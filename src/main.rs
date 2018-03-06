@@ -5,6 +5,10 @@ extern crate rocket;
 extern crate rabe;
 extern crate serde_json;
 extern crate rustc_serialize;
+extern crate rocket_simpleauth as auth;
+use auth::userpass::UserPass;
+use auth::status::{LoginStatus,LoginRedirect};
+use auth::dummy::DummyAuthenticator;
 
 #[macro_use] extern crate rocket_contrib;
 #[macro_use] extern crate serde_derive;
@@ -15,6 +19,11 @@ use std::sync::{Once, ONCE_INIT};
 use rocket_contrib::{Json};
 use rocket::response::status::BadRequest;
 use rocket::http::ContentType;
+use rocket::http::Header;
+use rocket::request::FromRequest;
+use rocket::request::Request;
+use rocket::outcome::Outcome;
+use rocket::http::Status;
 use std::io::Read;
 use std::io::Write;
 use rabe::bsw;
@@ -26,6 +35,36 @@ type BoxedResult<T> = std::result::Result<T, Box<Error>>;
 static START: Once = ONCE_INIT;
 static MK_FILE : &'static str = "abe-mk";
 static PK_FILE : &'static str = "abe-pk";
+
+// ----------------------------------------------------
+//           Internal structs follow
+// ----------------------------------------------------
+
+struct ApiKey(String);
+
+/// Returns true if `key` is a valid API key string.
+fn is_valid(key: &str) -> bool {
+    key == "valid_api_key"
+}
+
+impl<'t, 'r> FromRequest<'t, 'r> for ApiKey {
+    type Error = ();
+
+    fn from_request(request: &'t Request<'r>) -> Outcome<ApiKey, (Status,()), ()> {
+        let keys: Vec<_> = request.headers().get("x-api-key").collect();
+        if keys.len() != 1 {
+            return Outcome::Failure((Status::BadRequest, ()));
+        }
+
+        let key = keys[0];
+        if !is_valid(keys[0]) {
+            return Outcome::Forward(());
+        }
+
+        return Outcome::Success(ApiKey(key.to_string()));
+    }
+}
+
 
 // -----------------------------------------------------
 //               Message formats follow
@@ -58,7 +97,7 @@ struct DecMessage {
 //               REST APIs follow
 // -----------------------------------------------------
 #[get(path="/plain")]
-fn plain() -> String {
+fn plain(key: ApiKey) -> String {
 	String::from("Nope.")
 }
 
@@ -189,7 +228,8 @@ mod tests {
     #[test]
     fn simple_rest_call() {    	
         let client = Client::new(rocket()).expect("valid rocket instance");
-        let mut response = client.get("/plain").dispatch();
+        
+        let mut response = client.get("/plain").header(Header::new("x-api-key", "valid_api_key")).dispatch();
         assert_eq!(response.status(), Status::Ok);
         assert_eq!(response.body_string(), Some("Nope.".into()));
     }
