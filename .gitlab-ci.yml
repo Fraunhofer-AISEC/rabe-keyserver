@@ -7,7 +7,7 @@ build:cargo:
         - apt-get update
         - apt-get install -y git curl openssh-client bash
         - eval $(ssh-agent -s)
-        - mkdir ~/.ssh; echo '$DEPLOY_SSH_KEY' > ~/.ssh/id_rsa; chmod 0644 ~/.ssh/id_rsa
+        - mkdir ~/.ssh; echo '$DEPLOY_SSH_KEY' > ~/.ssh/id_rsa; chmod 0400 ~/.ssh/id_rsa
         - eval `ssh-agent -s`
         - ssh-add
     script:
