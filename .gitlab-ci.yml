@@ -5,7 +5,7 @@ build:cargo:
     stage: build
     before_script:
         - apt-get update
-        - apt-get install -y git curl openssh bash
+        - apt-get install -y git curl openssh-client bash
         - eval $(ssh-agent -s)
         - bash -c "ssh-add <(echo '$DEPLOY_SSH_KEY')"
     script:
