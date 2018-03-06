@@ -4,6 +4,7 @@ image: "rustdocker/rust:nightly"
 build:cargo:
     stage: build
     before_script:
+        - apt-get update
         - apt-get install -y git curl openssh bash
         - eval $(ssh-agent -s)
         - bash -c "ssh-add <(echo '$DEPLOY_SSH_KEY')"
