@@ -6,7 +6,7 @@ build:cargo:
     before_script:
         - which ssh-agent || ( apt-get update -y && apt-get install openssh-client git curl -y )
         - eval `ssh-agent -s`
-        - echo "$SSH_DEPLOY_KEY" | tr -d '\r' | ssh-add - > /dev/null
+        - echo "$DEPLOY_SSH_KEY" | tr -d '\r' | ssh-add - > /dev/null
         - mkdir -p ~/.ssh && chmod 700 ~/.ssh
     script:
         - cargo build --verbose --jobs 1 --release # Don't paralize to make errors more readable
