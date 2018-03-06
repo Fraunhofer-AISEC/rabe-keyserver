@@ -4,11 +4,10 @@ image: "rustdocker/rust:nightly"
 build:cargo:
     stage: build
     before_script:
-        - apt-get update
-        - apt-get install -y git curl openssh-client bash
-        - mkdir ~/.ssh; echo '$DEPLOY_SSH_KEY' > ~/.ssh/id_rsa; chmod 0400 ~/.ssh/id_rsa
+        - which ssh-agent || ( apt-get update -y && apt-get install openssh-client git curl -y )
         - eval `ssh-agent -s`
-        - ssh-add
+        - echo "$SSH_PRIVATE_KEY" | tr -d '\r' | ssh-add - > /dev/null
+        - mkdir -p ~/.ssh && chmod 700 ~/.ssh
     script:
         - cargo build --verbose --jobs 1 --release # Don't paralize to make errors more readable
         - cargo test --verbose --jobs 1 --release  # Don't paralize to make errors more readable
