@@ -3,11 +3,12 @@ image: "rustdocker/rust:nightly"
 # Use cargo to build the project
 build:cargo:
     stage: build
+    before_script:
+        - apk add --no-cache git curl openssh bash
+        - eval $(ssh-agent -s)
+        - bash -c "ssh-add <(echo '$DEPLOY_SSH_KEY')"
     script:
         - cargo build --verbose --jobs 1 --release # Don't paralize to make errors more readable
-
-# Use carge to test the project
-test:cargo:
-    stage: test
-    script:
         - cargo test --verbose --jobs 1 --release  # Don't paralize to make errors more readable
+    
+
