@@ -93,6 +93,12 @@ struct DecMessage {
 	sk :String
 }
 
+#[derive(Serialize, Deserialize)]
+struct User {
+	user : String,
+	password : String
+}
+
 // -----------------------------------------------------
 //               REST APIs follow
 // -----------------------------------------------------
@@ -115,6 +121,16 @@ fn index(_m:Json<Message>) -> Json<Message> {
     //Json(json!{ "status" : &'static str })
     Json(_m: Message)
 }
+
+#[post("/login", format = "application/json", data = "<user>")]
+fn login(user: Json<User>) -> Result<Json<String>, BadRequest<String>>  {
+	if user.user=="admin" && user.password=="admin" {
+		Ok(Json(String::from("valid_api_key")))
+	} else {
+		Err(BadRequest(Some(format!("Invalid"))))
+	}
+}
+
 
 #[post(path="/keygen", format="application/json", data="<d>")]
 fn keygen(d:Json<KeyGenMsg>) -> Result<Json<String>, BadRequest<String>>  {
@@ -200,7 +216,7 @@ fn rocket() -> rocket::Rocket {
 	    }
 	});
 	
-    rocket::ignite().mount("/", routes![index, plain, pk, keygen, encrypt, decrypt])
+    rocket::ignite().mount("/", routes![index, plain, login, pk, keygen, encrypt, decrypt])
 }
 
 fn main() {
@@ -234,6 +250,29 @@ mod tests {
         assert_eq!(response.body_string(), Some("Nope.".into()));
     }
         
+    #[test]
+    fn login_succ() {    	
+        let client = Client::new(rocket()).expect("valid rocket instance");
+        
+        let login = User {
+        	user : String::from("admin"),
+        	password : String::from("admin")
+        };
+        
+        let mut response = client.post("/login")
+					        .header(ContentType::JSON)
+					        .body(serde_json::to_string(&json!(&login)).expect("Attribute serialization"))
+					        .dispatch();
+					        
+        match response.body_string() {
+        	Some(r) => println!("RESULT: {} ",r),
+        	None => println!("no result")
+        }
+        assert_eq!(response.status(), Status::Ok);
+        
+        assert_eq!(response.body_string(), Some("valid_api_key.".into()));
+    }
+    
     #[test]
     fn test_setup() {        
         let client = Client::new(rocket()).expect("valid rocket instance");
