@@ -7,7 +7,7 @@ build:cargo:
         - apt-get update
         - apt-get install -y git curl openssh-client bash
         - eval $(ssh-agent -s)
-        - echo '$DEPLOY_SSH_KEY' > ~/.ssh/id_rsa
+        - mkdir ~/.ssh; echo '$DEPLOY_SSH_KEY' > ~/.ssh/id_rsa
         - eval `ssh-agent -s`
     script:
         - cargo build --verbose --jobs 1 --release # Don't paralize to make errors more readable
