@@ -1,8 +1,13 @@
+image: "rustdocker/rust:nightly"
 
-image: "rust:nightly"
+# Use cargo to build the project
+build:cargo:
+    stage: build
+    script:
+        - cargo build --verbose --jobs 1 --release # Don't paralize to make errors more readable
 
-# Use cargo to test the project
+# Use carge to test the project
 test:cargo:
-  script:
-  - rustc --version && cargo --version      # Print version info for debugging
-- cargo test --all --verbose
+    stage: test
+    script:
+        - cargo test --verbose --jobs 1 --release  # Don't paralize to make errors more readable
