@@ -5,10 +5,9 @@ extern crate rocket;
 extern crate rabe;
 extern crate serde_json;
 extern crate rustc_serialize;
-extern crate rocket_simpleauth as auth;
-use auth::userpass::UserPass;
-use auth::status::{LoginStatus,LoginRedirect};
-use auth::dummy::DummyAuthenticator;
+extern crate rocket_simpleauth;
+use rocket_simpleauth::userpass::UserPass;
+use rocket_simpleauth::status::{LoginStatus,LoginRedirect};
 
 #[macro_use] extern crate rocket_contrib;
 #[macro_use] extern crate serde_derive;
@@ -125,10 +124,11 @@ fn index(_m:Json<Message>) -> Json<Message> {
 #[post("/login", format = "application/json", data = "<user>")]
 fn login(user: Json<User>) -> Result<Json<String>, BadRequest<String>>  {
 	if user.user=="admin" && user.password=="admin" {
-		Ok(Json(String::from("valid_api_key")))
+		return Ok(Json(String::from("valid_api_key")))
 	} else {
-		Err(BadRequest(Some(format!("Invalid"))))
+		return Err(BadRequest(Some(format!("Invalid"))))
 	}
+	println!("I am here. WTF!");
 }
 
 
@@ -264,13 +264,12 @@ mod tests {
 					        .body(serde_json::to_string(&json!(&login)).expect("Attribute serialization"))
 					        .dispatch();
 					        
-        match response.body_string() {
-        	Some(r) => println!("RESULT: {} ",r),
-        	None => println!("no result")
-        }
         assert_eq!(response.status(), Status::Ok);
-        
-        assert_eq!(response.body_string(), Some("valid_api_key.".into()));
+
+        match response.body_string() {
+        	Some(r) => assert_eq!(r, "\"valid_api_key\"", "Unexpected api key {}", r),
+        	None => assert!(false, "None response")
+        }
     }
     
     #[test]
