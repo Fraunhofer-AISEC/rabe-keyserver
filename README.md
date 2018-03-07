@@ -1,3 +1,5 @@
+[![pipeline status](https://git-int.aisec.fraunhofer.de/sas/rust-abe-rest/badges/develop/pipeline.svg)](https://git-int.aisec.fraunhofer.de/sas/rust-abe-rest/commits/develop)
+
 # REST API for rust-abe attribute based encryption library
 
 At present, this is a toy project and only supports the BSW ABE scheme. Feel free to extend as desired.
