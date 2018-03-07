@@ -5,10 +5,9 @@ extern crate rocket;
 extern crate rabe;
 extern crate serde_json;
 extern crate rustc_serialize;
-extern crate rocket_simpleauth as auth;
-use auth::userpass::UserPass;
-use auth::status::{LoginStatus,LoginRedirect};
-use auth::dummy::DummyAuthenticator;
+extern crate rocket_simpleauth;
+use rocket_simpleauth::userpass::UserPass;
+use rocket_simpleauth::status::{LoginStatus,LoginRedirect};
 
 #[macro_use] extern crate rocket_contrib;
 #[macro_use] extern crate serde_derive;
