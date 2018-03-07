@@ -1,4 +1,4 @@
-[![pipeline status](https://git-int.aisec.fraunhofer.de/sas/rust-abe-rest/badges/develop/pipeline.svg)](https://git-int.aisec.fraunhofer.de/sas/rust-abe-rest/commits/develop)
+[![pipeline status](https://git-int.aisec.fraunhofer.de/sas/rust-abe-rest/badges/develop/pipeline.svg)](https://git-int.aisec.fraunhofer.de/sas/rust-abe-rest/commits/master)
 
 # REST API for rust-abe attribute based encryption library
 
