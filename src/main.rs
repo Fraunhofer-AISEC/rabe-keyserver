@@ -11,6 +11,7 @@ use rocket_simpleauth::status::{LoginStatus,LoginRedirect};
 
 #[macro_use] extern crate rocket_contrib;
 #[macro_use] extern crate serde_derive;
+#[macro_use] extern crate diesel;
 
 use std::error::*;
 use std::fs::*;
@@ -23,17 +24,22 @@ use rocket::request::FromRequest;
 use rocket::request::Request;
 use rocket::outcome::Outcome;
 use rocket::http::Status;
+use diesel::*;
 use std::io::Read;
 use std::io::Write;
+use std::env;
 use rabe::bsw;
 use rabe::tools;
+
+pub mod schema;
+
 
 // Change the alias to `Box<error::Error>`.
 type BoxedResult<T> = std::result::Result<T, Box<Error>>;
 
 static START: Once = ONCE_INIT;
-static MK_FILE : &'static str = "abe-mk";
-static PK_FILE : &'static str = "abe-pk";
+static MK_FILE: &'static str = "abe-mk";
+static PK_FILE: &'static str = "abe-pk";
 
 // ----------------------------------------------------
 //           Internal structs follow
@@ -43,7 +49,7 @@ struct ApiKey(String);
 
 /// Returns true if `key` is a valid API key string.
 fn is_valid(key: &str) -> bool {
-    key == "valid_api_key"
+    key == env::var("API_KEY").expect("API_KEY must be set")
 }
 
 impl<'t, 'r> FromRequest<'t, 'r> for ApiKey {
@@ -204,6 +210,36 @@ fn init_abe_setup() -> BoxedResult<()> {
 	 f_mk.write(hex_mk.as_bytes())?;
 	 f_pk.write(hex_pk.as_bytes())?;
 	 Ok(())
+}
+
+fn db_connect() -> SqliteConnection {
+	let database_url : String = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
+	SqliteConnection::establish(&database_url).expect(&format!("Error connecting to {}", database_url))
+}
+
+fn db_add_user(conn: &SqliteConnection, username: String, passwd: String, api_key: String) {
+	use schema::users;
+	
+	let user = schema::NewUser {
+		username: username,
+		password: passwd,
+		salt: &1234,
+		api_key: api_key
+	};
+	
+    diesel::insert_into(users::table)
+        .values(&user)
+        .execute(conn)
+		.expect("Error saving user");
+}
+
+fn db_get_user<'a>(conn: SqliteConnection, username: &'a String) -> schema::User {
+	use schema::users;
+	use schema::users::dsl::*;
+	
+	 users::table.filter(users::username.eq(username))
+        .first::<schema::User>(&conn)
+        .expect("Error loading users")
 }
 
 fn rocket() -> rocket::Rocket {
