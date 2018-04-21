@@ -8,7 +8,6 @@ extern crate rustc_serialize;
 extern crate blake2_rfc;
 extern crate rocket_simpleauth;
 extern crate rand;
-use rocket_simpleauth::status::{LoginStatus,LoginRedirect};
 
 #[macro_use] extern crate rocket_contrib;
 #[macro_use] extern crate serde_derive;
@@ -18,16 +17,14 @@ use std::error::*;
 use std::fs::*;
 use std::sync::{Once, ONCE_INIT};
 use rand::Rng;
+use rand::os::OsRng;
 use rocket_contrib::{Json};
 use rocket::response::status::BadRequest;
-use rocket::http::ContentType;
-use rocket::http::Header;
+use rocket::http::*;
 use rocket::request::FromRequest;
 use rocket::request::Request;
 use rocket::outcome::Outcome;
-use rocket::http::Status;
 use diesel::*;
-use diesel::mysql::*;
 use std::str;
 use std::io::Read;
 use std::io::Write;
@@ -46,6 +43,8 @@ type BoxedResult<T> = std::result::Result<T, Box<Error>>;
 static START: Once = ONCE_INIT;
 static MK_FILE: &'static str = "abe-mk";
 static PK_FILE: &'static str = "abe-pk";
+
+const SCHEMES: &'static [&'static str] = &["bsw"];
 
 // ----------------------------------------------------
 //           Internal structs follow
@@ -84,6 +83,11 @@ struct Message {
 }
 
 #[derive(Serialize, Deserialize)]
+struct SetupMsg {
+	scheme: String,
+}
+
+#[derive(Serialize, Deserialize)]
 struct KeyGenMsg {
 	attributes: Vec<String>
 }
@@ -111,7 +115,7 @@ struct User {
 //               REST APIs follow
 // -----------------------------------------------------
 #[get(path="/pk")]
-fn pk(key: ApiKey) -> Result<String, BadRequest<String>> {
+fn pk(_key: ApiKey) -> Result<String, BadRequest<String>> {
 	 match get_pk() {
 	 	Ok(pk) => Ok(tools::into_hex(pk).unwrap()),
 	 	Err(_) => Err(BadRequest(Some("Failure".to_string())))
@@ -131,7 +135,9 @@ fn login(user: Json<User>) -> Result<Json<String>, BadRequest<String>>  {
 
 
 #[post(path="/keygen", format="application/json", data="<d>")]
-fn keygen(d:Json<KeyGenMsg>, key: ApiKey) -> Result<Json<String>, BadRequest<String>>  {
+fn keygen(d:Json<KeyGenMsg>, _key: ApiKey) -> Result<Json<String>, BadRequest<String>>  {
+    
+    let param: KeyGenMsg = d.into_inner();
     
     println!("Generating mk");
     let msk = match get_mk() {
@@ -144,7 +150,7 @@ fn keygen(d:Json<KeyGenMsg>, key: ApiKey) -> Result<Json<String>, BadRequest<Str
     	Err(e) => return Err(BadRequest(Some(format!("pk failure: {}", e)))),
     	Ok(r) => r
     };
-    let mut _attributes = d.into_inner().attributes;
+    let mut _attributes = param.attributes;
     println!("Generating attributes");
     let res:bsw::CpAbeSecretKey = bsw::cpabe_keygen(&pk, &msk, &_attributes).unwrap();
     println!("{:?}",Json(tools::into_hex(&res)));
@@ -152,7 +158,7 @@ fn keygen(d:Json<KeyGenMsg>, key: ApiKey) -> Result<Json<String>, BadRequest<Str
 }
 
 #[post(path="/encrypt", format="application/json", data="<d>")]
-fn encrypt(d:Json<EncMessage>, key: ApiKey) -> Result<Json<String>, BadRequest<String>>  {
+fn encrypt(d:Json<EncMessage>, _key: ApiKey) -> Result<Json<String>, BadRequest<String>>  {
     let pk_hex : &String = &d.public_key.replace("\"", "");
     let pk : bsw::CpAbePublicKey = tools::from_hex(&pk_hex).unwrap();
     let res = bsw::cpabe_encrypt(&pk, &d.policy, &d.plaintext).unwrap();
@@ -160,7 +166,7 @@ fn encrypt(d:Json<EncMessage>, key: ApiKey) -> Result<Json<String>, BadRequest<S
 }
 
 #[post(path="/decrypt", format="application/json", data="<d>")]
-fn decrypt(d:Json<DecMessage>, key: ApiKey) -> Result<Json<String>, BadRequest<String>>  {
+fn decrypt(d:Json<DecMessage>, _key: ApiKey) -> Result<Json<String>, BadRequest<String>>  {
     let sk_hex : String = d.sk.replace("\"", "");
     let ct_hex : String = d.ct.replace("\"", "");
     let ct : bsw::CpAbeCiphertext = tools::from_hex(&ct_hex).unwrap();
@@ -180,10 +186,22 @@ fn add_user(d:Json<User>) -> Result<(), BadRequest<String>>  {
     
     let conn = db_connect();
 	
-    let res= match db_add_user(&conn, &username, &passwd, salt, &api_key) {
+    match db_add_user(&conn, &username, &passwd, salt, &api_key) {
     	Err(e) => {println!("Nope! {}", e); return Err(BadRequest(Some(format!("Failure adding userpk failure: {}", e))))},
-    	Ok(r) => return Ok(())
+    	Ok(_r) => return Ok(())
+    }
+}
+#[post(path="/setup", format="application/json", data="<d>")]
+fn setup(d:Json<SetupMsg>, key: ApiKey) -> Result<(String), BadRequest<String>> {
+	let param: SetupMsg = d.into_inner();
+    let conn: MysqlConnection = db_connect();
+    let user = db_get_user_of_apikey(&conn, &key.0);
+    let session_id: String = match db_get_session(&conn, &key.0.to_string(), &param.scheme) {
+    	Ok(sess) => sess.session_id,
+    	Err(_) => db_create_session(&conn, &user.username, &param.scheme).unwrap().to_string()
     };
+    
+    return Ok(session_id);
 }
 
 fn generate_api_key() -> String {
@@ -251,17 +269,21 @@ fn db_add_user(conn: &MysqlConnection, username: &String, passwd: &String, salt:
         .execute(conn)
 }
 
-fn db_create_session(conn: &MysqlConnection, username: &String, scheme: &String) -> Result<i64,diesel::result::Error> {
+fn db_create_session(conn: &MysqlConnection, username: &String, scheme: &String) -> Result<String, String> {
 	use schema::sessions;
-	
+	println!("Got scheme {}", scheme);
+	if !SCHEMES.contains(&scheme.as_str()) {
+		return Err("Invalid scheme".to_string());
+	}
+
 	let user: schema::User = db_get_user(conn, username);
-	
-	let session_id = rand::thread_rng().gen::<i64>();
+	let session_id: String = OsRng::new().unwrap().next_u64().to_string();
 	
 	let session = schema::NewSession {
 		user_id: user.id,
 		is_initialized: false,
-		session_id: session_id.to_string(),
+		scheme: scheme.to_string(),
+		session_id: session_id.clone(),
 		public_key: "".to_string(),
 		private_key: "".to_string()
 	};
@@ -270,17 +292,33 @@ fn db_create_session(conn: &MysqlConnection, username: &String, scheme: &String)
     match diesel::insert_into(sessions::table)
         .values(&session)
         .execute(conn) {
-        	Ok(_) => (),
-        	Err(e) => println!("Error {}", e)
+        	Ok(_usize) => Ok(session_id),
+        	Err(_e) => Err("Could not insert into sessions".to_string())
         }
+}
+
+fn db_get_session(conn: &MysqlConnection, api_key: &String, scheme: &String) -> Result<schema::Session, diesel::result::Error> {
+	use schema::sessions;
 	
-	select(schema::last_insert_id).first(conn)
+	let user: schema::User = db_get_user_of_apikey(conn, api_key);
+	
+	 sessions::table.filter(sessions::user_id.eq(user.id))
+		 .filter(sessions::scheme.eq(scheme))
+        .first::<schema::Session>(conn)
 }
 
 fn db_get_user<'a>(conn: &MysqlConnection, user: &'a String) -> schema::User {
 	use schema::users;
 	
 	 users::table.filter(users::username.eq(user))
+        .first::<schema::User>(conn)
+        .expect("Error loading users")
+}
+
+fn db_get_user_of_apikey<'a>(conn: &MysqlConnection, api_key: &'a String) -> schema::User {
+	use schema::users;
+	
+	users::table.filter(users::api_key.eq(api_key))
         .first::<schema::User>(conn)
         .expect("Error loading users")
 }
@@ -301,7 +339,7 @@ fn rocket() -> rocket::Rocket {
 	    }
 	});
 	
-    rocket::ignite().mount("/", routes![login, pk, keygen, encrypt, decrypt, add_user])
+    rocket::ignite().mount("/", routes![login, setup, pk, keygen, encrypt, decrypt, add_user])
 }
 
 fn main() {
@@ -375,7 +413,8 @@ mod tests {
     	let passwd: String = "blubb".to_string();
     	let api_key: String = "apikey".to_string();
     	let salt: i32 = 1234;
-    	db_add_user(&con, &user, &passwd, salt, &api_key);
+    	let result: usize = db_add_user(&con, &user, &passwd, salt, &api_key).unwrap();
+    	assert!(result > 0);
 
 		// Check that it is there
     	let u: schema::User = db_get_user(&con, &user);
@@ -393,9 +432,9 @@ mod tests {
     	let salt: i32 = 1234;
     	db_add_user(&con, &user, &passwd, salt, &api_key).expect("Failure adding user");
 
-		let scheme: String = "bwe".to_string();
+		let scheme: String = "bsw".to_string();
 
-		let session_id: i64 = db_create_session(&con, &user, &scheme).expect("Could not create session");
+		let session_id: String = db_create_session(&con, &user, &scheme).expect("Could not create session");
 		println!("Got session id {}", session_id);
     }
     
@@ -405,6 +444,7 @@ mod tests {
         
         println!("Have rocket");
         
+		// Create user
         let login = User {
         	user : String::from("admin"),
         	password : String::from("admin"),
@@ -417,6 +457,7 @@ mod tests {
 					        
         assert_eq!(response_add.status(), Status::Ok);
 
+        // Log in as user and get API ley
         let mut response = client.post("/login")
 					        .header(ContentType::JSON)
 					        .body(serde_json::to_string(&json!(&login)).expect("Attribute serialization"))
@@ -428,6 +469,19 @@ mod tests {
 
 		println!("Got API key {}", api_key);
 
+		// Set up scheme
+        let setup_msg: SetupMsg = SetupMsg {
+        	scheme: "bsw".to_string()
+        };
+        let mut response = client.post("/setup")
+					        .header(ContentType::JSON)
+					        .header(Header::new("x-api-key", api_key.clone()))
+					        .body(serde_json::to_string(&json!(&setup_msg)).expect("Setting up bsw"))
+					        .dispatch();
+		assert_eq!(response.status(), Status::Ok);
+		println!("SETUP RETURNED {}",response.body_string().unwrap());
+
+
         let msg: KeyGenMsg = KeyGenMsg {
         	attributes: vec!("bla".to_string(), "blubb".to_string())
         };
@@ -436,10 +490,9 @@ mod tests {
 
         let response = client.post("/keygen")
 					        .header(ContentType::JSON)
-					        .header(Header::new("x-api-key", api_key))
+					        .header(Header::new("x-api-key", api_key.clone()))
 					        .body(serde_json::to_string(&json!(&msg)).expect("Attribute serialization"))
-					        .dispatch();
-				
+					        .dispatch();				
 		assert_eq!(response.status(), Status::Ok);
     }  
 

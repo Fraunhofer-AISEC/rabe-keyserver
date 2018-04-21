@@ -48,12 +48,13 @@ pub struct NewUser{
 #[derive(Serialize, Deserialize)]
 #[belongs_to(User)]
 pub struct Session {
-	id: i32,
-	user_id: i32,
-	session_id: String,
-	public_key: String,
-	private_key: String,
-	is_initialized: bool
+	pub id: i32,
+	pub user_id: i32,
+	pub session_id: String,
+	pub scheme: String,
+	pub public_key: String,
+	pub private_key: String,
+	pub is_initialized: bool
 }
 #[derive(Queryable,Associations, PartialEq, Debug)]
 #[table_name = "sessions"]
@@ -63,6 +64,7 @@ pub struct Session {
 pub struct NewSession {
 	pub user_id: i32,
 	pub session_id: String,
+	pub scheme: String,
 	pub public_key: String,
 	pub private_key: String,
 	pub is_initialized: bool
