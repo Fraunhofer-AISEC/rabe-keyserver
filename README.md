@@ -21,3 +21,15 @@ eval `ssh-agent -s`
 ```
 
 Alternatively, you can checkout rust-abe in a folder next to abe-keyserver and uncomment the respective line in `Cargo.toml`.
+
+Install diesel:
+
+```
+cargo install diesel_cli
+```
+
+Run with mysql (make sure you have a mysql server running on localhost):
+
+```
+DATABASE_URL=mysql://username:password@localhost/rabe cargo test -- --nocapture
+```

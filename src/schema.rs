@@ -8,8 +8,8 @@ table! {
 		}
 }
 
-
 #[derive(Queryable)]
+#[derive(Serialize, Deserialize)]
 pub struct User {
     pub id: i32,
     pub username: String,
@@ -20,9 +20,10 @@ pub struct User {
 
 #[derive(Insertable)]
 #[table_name = "users"]
-pub struct NewUser<'a> {
+#[derive(Serialize, Deserialize)]
+pub struct NewUser{
     pub username: String,
     pub password: String,
-    pub salt: &'a i32,
+    pub salt: i32,
     pub api_key: String,
 }
