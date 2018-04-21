@@ -7,6 +7,7 @@ extern crate serde_json;
 extern crate rustc_serialize;
 extern crate blake2_rfc;
 extern crate rocket_simpleauth;
+extern crate rand;
 use rocket_simpleauth::status::{LoginStatus,LoginRedirect};
 
 #[macro_use] extern crate rocket_contrib;
@@ -16,6 +17,7 @@ use rocket_simpleauth::status::{LoginStatus,LoginRedirect};
 use std::error::*;
 use std::fs::*;
 use std::sync::{Once, ONCE_INIT};
+use rand::Rng;
 use rocket_contrib::{Json};
 use rocket::response::status::BadRequest;
 use rocket::http::ContentType;
@@ -51,12 +53,6 @@ static PK_FILE: &'static str = "abe-pk";
 
 struct ApiKey(String);
 
-/// Returns true if `key` is a valid API key string.
-fn is_valid(key: &str) -> bool {
-    key == env::var("API_KEY").expect("API_KEY must be set");
-    return true;	// TODO incomplete
-}
-
 impl<'t, 'r> FromRequest<'t, 'r> for ApiKey {
     type Error = ();
 
@@ -66,9 +62,11 @@ impl<'t, 'r> FromRequest<'t, 'r> for ApiKey {
             return Outcome::Failure((Status::BadRequest, ()));
         }
 
+        println!("Got API key {}", keys[0]);
         let key = keys[0];
         if !is_valid(keys[0]) {
-            return Outcome::Forward(());
+//            return Outcome::Forward(());
+            return Outcome::Failure((Status::Unauthorized, ()));
         }
 
         return Outcome::Success(ApiKey(key.to_string()));
@@ -113,7 +111,7 @@ struct User {
 //               REST APIs follow
 // -----------------------------------------------------
 #[get(path="/pk")]
-fn pk() -> Result<String, BadRequest<String>> {
+fn pk(key: ApiKey) -> Result<String, BadRequest<String>> {
 	 match get_pk() {
 	 	Ok(pk) => Ok(tools::into_hex(pk).unwrap()),
 	 	Err(_) => Err(BadRequest(Some("Failure".to_string())))
@@ -133,7 +131,7 @@ fn login(user: Json<User>) -> Result<Json<String>, BadRequest<String>>  {
 
 
 #[post(path="/keygen", format="application/json", data="<d>")]
-fn keygen(d:Json<KeyGenMsg>) -> Result<Json<String>, BadRequest<String>>  {
+fn keygen(d:Json<KeyGenMsg>, key: ApiKey) -> Result<Json<String>, BadRequest<String>>  {
     
     println!("Generating mk");
     let msk = match get_mk() {
@@ -154,7 +152,7 @@ fn keygen(d:Json<KeyGenMsg>) -> Result<Json<String>, BadRequest<String>>  {
 }
 
 #[post(path="/encrypt", format="application/json", data="<d>")]
-fn encrypt(d:Json<EncMessage>) -> Result<Json<String>, BadRequest<String>>  {
+fn encrypt(d:Json<EncMessage>, key: ApiKey) -> Result<Json<String>, BadRequest<String>>  {
     let pk_hex : &String = &d.public_key.replace("\"", "");
     let pk : bsw::CpAbePublicKey = tools::from_hex(&pk_hex).unwrap();
     let res = bsw::cpabe_encrypt(&pk, &d.policy, &d.plaintext).unwrap();
@@ -162,7 +160,7 @@ fn encrypt(d:Json<EncMessage>) -> Result<Json<String>, BadRequest<String>>  {
 }
 
 #[post(path="/decrypt", format="application/json", data="<d>")]
-fn decrypt(d:Json<DecMessage>) -> Result<Json<String>, BadRequest<String>>  {
+fn decrypt(d:Json<DecMessage>, key: ApiKey) -> Result<Json<String>, BadRequest<String>>  {
     let sk_hex : String = d.sk.replace("\"", "");
     let ct_hex : String = d.ct.replace("\"", "");
     let ct : bsw::CpAbeCiphertext = tools::from_hex(&ct_hex).unwrap();
@@ -253,6 +251,32 @@ fn db_add_user(conn: &MysqlConnection, username: &String, passwd: &String, salt:
         .execute(conn)
 }
 
+fn db_create_session(conn: &MysqlConnection, username: &String, scheme: &String) -> Result<i64,diesel::result::Error> {
+	use schema::sessions;
+	
+	let user: schema::User = db_get_user(conn, username);
+	
+	let session_id = rand::thread_rng().gen::<i64>();
+	
+	let session = schema::NewSession {
+		user_id: user.id,
+		is_initialized: false,
+		session_id: session_id.to_string(),
+		public_key: "".to_string(),
+		private_key: "".to_string()
+	};
+	
+	// Return auto-gen'd session id
+    match diesel::insert_into(sessions::table)
+        .values(&session)
+        .execute(conn) {
+        	Ok(_) => (),
+        	Err(e) => println!("Error {}", e)
+        }
+	
+	select(schema::last_insert_id).first(conn)
+}
+
 fn db_get_user<'a>(conn: &MysqlConnection, user: &'a String) -> schema::User {
 	use schema::users;
 	
@@ -291,6 +315,17 @@ fn main() {
     }
 }
 
+/// Returns true if `key` is a valid API key string.
+fn is_valid(key: &str) -> bool {
+	use schema::users;
+	let conn = db_connect();
+
+	match users::table.filter(users::api_key.eq(key))
+        .first::<schema::User>(&conn) {
+        	Ok(_user) => return true,
+        	Err(_e) => return false
+        }
+}
 // -----------------------------------------------
 //                   Tests follow
 // -----------------------------------------------
@@ -332,7 +367,7 @@ mod tests {
     }
     
     #[test]
-    fn test_db() {
+    fn test_db_user() {
 		let con = db_connect();
 
     	// Write user into db		    	
@@ -348,11 +383,51 @@ mod tests {
     }
     
     #[test]
+    fn test_db_session() {
+		let con = db_connect();
+
+    	// Create a user		    	
+    	let user: String = "bla".to_string();
+    	let passwd: String = "blubb".to_string();
+    	let api_key: String = "apikey".to_string();
+    	let salt: i32 = 1234;
+    	db_add_user(&con, &user, &passwd, salt, &api_key).expect("Failure adding user");
+
+		let scheme: String = "bwe".to_string();
+
+		let session_id: i64 = db_create_session(&con, &user, &scheme).expect("Could not create session");
+		println!("Got session id {}", session_id);
+    }
+    
+    #[test]
     fn test_setup() {        
         let client = Client::new(rocket()).expect("valid rocket instance");
         
         println!("Have rocket");
         
+        let login = User {
+        	user : String::from("admin"),
+        	password : String::from("admin"),
+        };
+        
+        let response_add = client.post("/add_user")
+        					.header(ContentType::JSON)
+					        .body(serde_json::to_string(&json!(&login)).expect("Attribute serialization"))
+					        .dispatch();
+					        
+        assert_eq!(response_add.status(), Status::Ok);
+
+        let mut response = client.post("/login")
+					        .header(ContentType::JSON)
+					        .body(serde_json::to_string(&json!(&login)).expect("Attribute serialization"))
+					        .dispatch();
+					        
+        assert_eq!(response.status(), Status::Ok);
+		let res = response.body_string().unwrap();
+        let api_key: String = res.to_string().replace("\"","");
+
+		println!("Got API key {}", api_key);
+
         let msg: KeyGenMsg = KeyGenMsg {
         	attributes: vec!("bla".to_string(), "blubb".to_string())
         };
@@ -361,6 +436,7 @@ mod tests {
 
         let response = client.post("/keygen")
 					        .header(ContentType::JSON)
+					        .header(Header::new("x-api-key", api_key))
 					        .body(serde_json::to_string(&json!(&msg)).expect("Attribute serialization"))
 					        .dispatch();
 				
@@ -371,16 +447,45 @@ mod tests {
     fn test_encrypt_decrypt() {
         let client = Client::new(rocket()).expect("valid rocket instance");
 
+        let login = User {
+        	user : String::from("admin"),
+        	password : String::from("admin"),
+        };
+        
+        let response_add = client.post("/add_user")
+        					.header(ContentType::JSON)
+					        .body(serde_json::to_string(&json!(&login)).expect("Attribute serialization"))
+					        .dispatch();
+					        
+        assert_eq!(response_add.status(), Status::Ok);
+
+        let mut response = client.post("/login")
+					        .header(ContentType::JSON)
+					        .body(serde_json::to_string(&json!(&login)).expect("Attribute serialization"))
+					        .dispatch();
+					        
+        assert_eq!(response.status(), Status::Ok);
+		let res = response.body_string().unwrap();
+        let api_key: String = res.to_string().replace("\"","");
+
+		println!("Got API key {}", api_key);
+
+        let msg: KeyGenMsg = KeyGenMsg {
+        	attributes: vec!("bla".to_string(), "blubb".to_string())
+        };
+
 		// Create Sk for attribute set
         let attr = vec!(["attribute_1", "attribute_2"]);
         let mut response = client.post("/keygen")
 					        .header(ContentType::JSON)
+					        .header(Header::new("x-api-key", api_key.clone()))
 					        .body(serde_json::to_string(&json!(&attr)).expect("Attribute serialization"))
 					        .dispatch();
 				
 		let secret_key : String = response.body_string().unwrap().replace("\"", "");
 		
         let mut resp_pk = client.get("/pk")
+					        .header(Header::new("x-api-key", api_key.clone()))
 					        .dispatch();
 		let pk = resp_pk.body_string().unwrap();
 
@@ -393,6 +498,7 @@ mod tests {
 		};
 		let mut resp_enc = client.post("/encrypt")
 					        .header(ContentType::JSON)
+					        .header(Header::new("x-api-key", api_key.clone()))
 					        .body(serde_json::to_string(&json!(&msg)).expect("Encryption"))
 					        .dispatch();
 		
@@ -406,6 +512,7 @@ mod tests {
 		};
 		let mut resp_dec = client.post("/decrypt")
 					        .header(ContentType::JSON)
+					        .header(Header::new("x-api-key", api_key.clone()))
 					        .body(serde_json::to_string(&json!(&c)).expect("Decryption"))
 					        .dispatch();
 		let pt_hex:String = resp_dec.body_string().unwrap().replace("\"","");
