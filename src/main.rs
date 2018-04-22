@@ -8,6 +8,7 @@ extern crate rustc_serialize;
 extern crate blake2_rfc;
 extern crate rocket_simpleauth;
 extern crate rand;
+extern crate uuid;
 
 #[macro_use] extern crate rocket_contrib;
 #[macro_use] extern crate serde_derive;
@@ -32,6 +33,7 @@ use std::env;
 use rabe::bsw;
 use rabe::tools;
 use blake2_rfc::blake2b::*;
+use uuid::Uuid;
 
 
 pub mod schema;
@@ -205,7 +207,7 @@ fn setup(d:Json<SetupMsg>, key: ApiKey) -> Result<(String), BadRequest<String>> 
 }
 
 fn generate_api_key() -> String {
-	return "1234".into();
+	return Uuid::new_v4().to_string();
 }
 
 // ------------------------------------------------------------
@@ -398,10 +400,11 @@ mod tests {
 					        
         assert_eq!(response.status(), Status::Ok);
 
-        match response.body_string() {
-        	Some(r) => assert_eq!(r, "\"1234\"", "Unexpected api key {}", r),
-        	None => assert!(false, "None response")
-        }
+		// Panics if API key is not in valid UUID format 
+		let body: String = response.body_string().unwrap().replace("\"", "");
+		let api_key: &str = body.as_str();
+		println!("API key: {}", api_key);
+		Uuid::parse_str(api_key).unwrap();
     }
     
     #[test]
