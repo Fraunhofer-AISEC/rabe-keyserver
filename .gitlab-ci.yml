@@ -11,6 +11,7 @@ variables:
 build:cargo:
     stage: build
     before_script:
+        - apt-get update -qq && apt-get install -y libmysqlclient-dev mysql-client
         - which ssh-agent || ( apt-get update -y && apt-get install openssh-client git curl -y )
         - eval `ssh-agent -s`
         - echo "$DEPLOY_SSH_KEY" | tr -d '\r' | ssh-add - > /dev/null
