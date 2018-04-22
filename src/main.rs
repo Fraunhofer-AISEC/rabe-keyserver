@@ -116,6 +116,11 @@ struct User {
 // -----------------------------------------------------
 //               REST APIs follow
 // -----------------------------------------------------
+
+/// Retrieves the public key for the current session.
+//
+/// Return a BadRequest error in case the public key is (not) available (yet).
+///
 #[get(path="/pk")]
 fn pk(_key: ApiKey) -> Result<String, BadRequest<String>> {
 	 match get_pk() {
