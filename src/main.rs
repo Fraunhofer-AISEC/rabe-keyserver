@@ -30,8 +30,8 @@ use std::str;
 use std::io::Read;
 use std::io::Write;
 use std::env;
-use rabe::bsw;
-use rabe::tools;
+use rabe::schemes::bsw;
+use rabe::utils::tools;
 use blake2_rfc::blake2b::*;
 use uuid::Uuid;
 
@@ -124,7 +124,7 @@ struct User {
 #[get(path="/pk")]
 fn pk(_key: ApiKey) -> Result<String, BadRequest<String>> {
 	 match get_pk() {
-	 	Ok(pk) => Ok(tools::into_hex(pk).unwrap()),
+	 	Ok(pk) => Ok(serde_json::to_string(&pk).unwrap()),
 	 	Err(_) => Err(BadRequest(Some("Failure".to_string())))
 	 }
 }
@@ -159,27 +159,33 @@ fn keygen(d:Json<KeyGenMsg>, _key: ApiKey) -> Result<Json<String>, BadRequest<St
     };
     let mut _attributes = param.attributes;
     println!("Generating attributes");
-    let res:bsw::CpAbeSecretKey = bsw::cpabe_keygen(&pk, &msk, &_attributes).unwrap();
-    println!("{:?}",Json(tools::into_hex(&res)));
-    Ok(Json(tools::into_hex(&res).unwrap()))
+    let res:bsw::CpAbeSecretKey = bsw::keygen(&pk, &msk, &_attributes).unwrap();
+    println!("{:?}",serde_json::to_string(&res));
+    Ok(Json(serde_json::to_string(&res).unwrap()))
 }
 
 #[post(path="/encrypt", format="application/json", data="<d>")]
 fn encrypt(d:Json<EncMessage>, _key: ApiKey) -> Result<Json<String>, BadRequest<String>>  {
-    let pk_hex : &String = &d.public_key.replace("\"", "");
-    let pk : bsw::CpAbePublicKey = tools::from_hex(&pk_hex).unwrap();
-    let res = bsw::cpabe_encrypt(&pk, &d.policy, &d.plaintext).unwrap();
-    Ok(Json(tools::into_hex(&res).unwrap()))
+    let pk_hex : &String = &d.public_key;
+    println!("Public key is {}", pk_hex);
+    let pk : bsw::CpAbePublicKey = serde_json::from_str(pk_hex.as_str()).unwrap();
+    let res = bsw::encrypt(&pk, &d.policy, &d.plaintext).unwrap();
+    Ok(Json(serde_json::to_string_pretty(&res).unwrap()))
 }
 
 #[post(path="/decrypt", format="application/json", data="<d>")]
 fn decrypt(d:Json<DecMessage>, _key: ApiKey) -> Result<Json<String>, BadRequest<String>>  {
-    let sk_hex : String = d.sk.replace("\"", "");
-    let ct_hex : String = d.ct.replace("\"", "");
-    let ct : bsw::CpAbeCiphertext = tools::from_hex(&ct_hex).unwrap();
-    let sk : bsw::CpAbeSecretKey = tools::from_hex(&sk_hex).unwrap();
-    let res = bsw::cpabe_decrypt(&sk, &ct);
-    Ok(Json(tools::into_hex(&res).unwrap()))
+    let sk_hex : String = serde_json::from_str(&d.sk).unwrap();
+    let ct_hex : String = serde_json::from_str(&d.ct).unwrap();
+    println!("sk: {}", sk_hex);
+    let ct : bsw::CpAbeCiphertext = serde_json::from_str(ct_hex.as_str()).unwrap();
+    let sk : bsw::CpAbeSecretKey = serde_json::from_str(sk_hex.as_str()).unwrap();
+    let res = bsw::decrypt(&sk, &ct).unwrap();
+    let s = match str::from_utf8(&res) {
+        Ok(v) => v,
+        Err(e) => panic!("Invalid UTF-8 sequence: {}", e),
+    };
+    Ok(Json(s.to_string()))
 }
 
 #[post(path="/add_user", format="application/json", data="<d>")]
@@ -235,22 +241,24 @@ fn get_mk() -> BoxedResult<bsw::CpAbeMasterKey> {
 	let mut f = try!(File::open(MK_FILE));
 	let mut s: String = String::new();
 	f.read_to_string(&mut s)?;
-	tools::from_hex(&mut s).ok_or("Could not read mk from file".into())
+	let mk: bsw::CpAbeMasterKey = serde_json::from_str(&mut s).unwrap();
+	return Ok(mk);
 }
 
 fn get_pk() -> BoxedResult<bsw::CpAbePublicKey> {
 	let mut f = try!(File::open(PK_FILE));
 	let mut s: String = String::new();
 	f.read_to_string(&mut s)?;
-	tools::from_hex(&mut s).ok_or("Could not read pk from file".into())
+	let pk: bsw::CpAbePublicKey = serde_json::from_str(&mut s).unwrap();
+	return Ok(pk);
 }
 
 fn init_abe_setup() -> BoxedResult<()> {
-	 let (pk, mk): (rabe::bsw::CpAbePublicKey,rabe::bsw::CpAbeMasterKey) = rabe::bsw::cpabe_setup();
+	 let (pk, mk): (bsw::CpAbePublicKey,bsw::CpAbeMasterKey) = bsw::setup();
 	 let mut f_mk = try!(File::create(MK_FILE));
 	 let mut f_pk = try!(File::create(PK_FILE));
-	 let hex_mk : String =try!(rabe::tools::into_hex(&mk).ok_or("Error converting mk to hex".to_string()));
-	 let hex_pk : String =try!(rabe::tools::into_hex(&pk).ok_or("Error converting pk to hex".to_string()));
+	 let hex_mk : String =try!(serde_json::to_string_pretty(&mk));
+	 let hex_pk : String =try!(serde_json::to_string_pretty(&pk));
 	 f_mk.write(hex_mk.as_bytes())?;
 	 f_pk.write(hex_pk.as_bytes())?;
 	 Ok(())
@@ -543,7 +551,7 @@ mod tests {
 					        .body(serde_json::to_string(&json!(&attr)).expect("Attribute serialization"))
 					        .dispatch();
 				
-		let secret_key : String = response.body_string().unwrap().replace("\"", "");
+		let secret_key : String = response.body_string().unwrap();
 		
         let mut resp_pk = client.get("/pk")
 					        .header(Header::new("x-api-key", api_key.clone()))
@@ -560,11 +568,11 @@ mod tests {
 		let mut resp_enc = client.post("/encrypt")
 					        .header(ContentType::JSON)
 					        .header(Header::new("x-api-key", api_key.clone()))
-					        .body(serde_json::to_string(&json!(&msg)).expect("Encryption"))
+					        .body(serde_json::to_string(&msg).expect("Encryption"))
 					        .dispatch();
 		
 		assert_eq!(resp_enc.status(), Status::Ok);
-		let ct:String = resp_enc.body_string().unwrap().replace("\"","");
+		let ct:String = resp_enc.body_string().unwrap();
 
 		// Decrypt again
 		let c : DecMessage = DecMessage { 
@@ -574,11 +582,13 @@ mod tests {
 		let mut resp_dec = client.post("/decrypt")
 					        .header(ContentType::JSON)
 					        .header(Header::new("x-api-key", api_key.clone()))
-					        .body(serde_json::to_string(&json!(&c)).expect("Decryption"))
+					        .body(serde_json::to_string(&c).unwrap())
 					        .dispatch();
-		let pt_hex:String = resp_dec.body_string().unwrap().replace("\"","");
-		let mut pt:String = tools::from_hex(&pt_hex).expect("From hex");
-		pt = pt.replace("\"","").trim().to_string();
+		let pt_hex: String = resp_dec.body_string().unwrap();
+		println!("HEX: {}", pt_hex);
+		let mut pt: String = serde_json::from_str(&pt_hex).expect("From json");
+		pt = pt.trim().to_string();
+		println!("REUSL: {}", pt);
 		assert_eq!(pt, "Encrypt me");
     }  
 }
