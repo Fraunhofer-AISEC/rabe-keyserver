@@ -1,5 +1,12 @@
 image: "rustdocker/rust:nightly"
 
+services:
+  - mysql:latest
+
+variables:
+  MYSQL_DATABASE: rabe # Created at image startup
+  MYSQL_ROOT_PASSWORD: passwd
+
 # Use cargo to build the project
 build:cargo:
     stage: build
@@ -10,6 +17,6 @@ build:cargo:
         - mkdir -p ~/.ssh && chmod 700 ~/.ssh
     script:
         - GIT_SSH_COMMAND="ssh -o StrictHostKeyChecking=no" cargo build --jobs 1 # Don't paralize to make errors more readable
-        - GIT_SSH_COMMAND="ssh -o StrictHostKeyChecking=no" cargo test --jobs 1  # Don't paralize to make errors more readable
+        - GIT_SSH_COMMAND="ssh -o StrictHostKeyChecking=no" RUST_BACKTRACE=1 DATABASE_URL=mysql://root:passwd@mysql/rabe cargo test --jobs 1  # Don't paralize to make errors more readable
     
 
