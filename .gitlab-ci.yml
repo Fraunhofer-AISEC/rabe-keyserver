@@ -18,7 +18,7 @@ build:cargo:
         - echo "$DEPLOY_SSH_KEY" | tr -d '\r' | ssh-add - > /dev/null
         - mkdir -p ~/.ssh && chmod 700 ~/.ssh
     script:
-        - diesel migration run
+        - DATABASE_URL=mysql://root:passwd@mysql/rabe diesel migration run
         - GIT_SSH_COMMAND="ssh -o StrictHostKeyChecking=no" cargo build --jobs 1 # Don't paralize to make errors more readable
         - GIT_SSH_COMMAND="ssh -o StrictHostKeyChecking=no" RUST_BACKTRACE=1 DATABASE_URL=mysql://root:passwd@mysql/rabe cargo test --jobs 1  # Don't paralize to make errors more readable
     
