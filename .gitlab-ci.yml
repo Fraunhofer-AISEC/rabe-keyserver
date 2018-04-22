@@ -1,7 +1,7 @@
 image: "rustdocker/rust:nightly"
 
 services:
-  - mysql:latest
+  - mysql:5.7
 
 variables:
   MYSQL_DATABASE: rabe # Created at image startup
