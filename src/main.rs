@@ -1,4 +1,4 @@
-#![feature(plugin, decl_macro, type_ascription)]	// Compiler plugins
+#![feature(plugin, decl_macro, custom_derive, type_ascription)]	// Compiler plugins
 #![plugin(rocket_codegen)]							// rocket code generator
 
 extern crate rocket;
@@ -19,9 +19,10 @@ use std::fs::*;
 use std::sync::{Once, ONCE_INIT};
 use rand::Rng;
 use rand::os::OsRng;
-use rocket_contrib::{Json};
+use rocket_contrib::{Json}; 
 use rocket::response::status::BadRequest;
 use rocket::http::*;
+use rocket::request::Form;
 use rocket::request::FromRequest;
 use rocket::request::Request;
 use rocket::outcome::Outcome;
@@ -108,9 +109,27 @@ struct DecMessage {
 }
 
 #[derive(Serialize, Deserialize)]
+#[derive(FromForm)]
 struct User {
-	user : String,
-	password : String
+	username: String,
+	password: String
+}
+
+/// OAuth (RFC6749) token request to /login endpoint
+#[derive(Serialize, Deserialize)]
+#[derive(FromForm)]
+struct TokenRequest {
+	grant_type: String,
+	username: String,
+	password: String
+}
+
+/// OAuth (RFC6749) token reponse from /login endpoint
+#[derive(Serialize, Deserialize)]
+struct AccessTokenResponse {
+   access_token: String,
+   token_type: String,
+   expires_in: u32
 }
 
 // -----------------------------------------------------
@@ -129,14 +148,21 @@ fn pk(_key: ApiKey) -> Result<String, BadRequest<String>> {
 	 }
 }
 
-#[post("/login", format = "application/json", data = "<user>")]
-fn login(user: Json<User>) -> Result<Json<String>, BadRequest<String>>  {
+#[post("/login", format = "application/x-www-form-urlencoded; charset=UTF-8", data = "<u>")]
+fn login(u: Form<TokenRequest>) -> Result<Json<AccessTokenResponse>, BadRequest<String>>  {
+	let user: &TokenRequest = u.get();
 	let conn = db_connect();	
-	let db_user = db_get_user(&conn, &user.user);
+	let db_user = db_get_user(&conn, &user.username);
 	if user.password == db_user.password {	// TODO compare salted hashes of pwd usng to_db_passwd()
-		return Ok(Json(String::from(db_user.api_key)));
+		let token_response = AccessTokenResponse {
+		   access_token: String::from(db_user.api_key),
+		   token_type: String::from("bearer"),
+		   expires_in: 60*60*24*356
+		};
+		
+		return Ok(Json(token_response));
 	}
-	println!("Invalid login {}/{}", &user.user, &user.password);
+	println!("Invalid login {}/{}", &user.username, &user.password);
 	return Err(BadRequest(Some(format!("Invalid"))))
 }
 
@@ -190,7 +216,7 @@ fn decrypt(d:Json<DecMessage>, _key: ApiKey) -> Result<Json<String>, BadRequest<
 
 #[post(path="/add_user", format="application/json", data="<d>")]
 fn add_user(d:Json<User>) -> Result<(), BadRequest<String>>  {
-    let ref username: String = d.user;
+    let ref username: String = d.username;
     let ref passwd: String = d.password;
     let salt: i32 = 1234;	// TODO use random salt
     let api_key : String = generate_api_key();
@@ -394,30 +420,31 @@ mod tests {
     fn test_login_succ() {    	
         let client = Client::new(rocket()).expect("valid rocket instance");
         
-        let login = User {
-        	user : String::from("admin"),
-        	password : String::from("admin"),
+        let user = User {
+        	username: String::from("admin"),
+        	password: String::from("admin")
         };
         
         let response_add = client.post("/add_user")
         					.header(ContentType::JSON)
-					        .body(serde_json::to_string(&json!(&login)).expect("Attribute serialization"))
+					        .body(serde_json::to_string(&json!(&user)).expect("Attribute serialization"))
 					        .dispatch();
 					        
         assert_eq!(response_add.status(), Status::Ok);
 
         let mut response = client.post("/login")
-					        .header(ContentType::JSON)
-					        .body(serde_json::to_string(&json!(&login)).expect("Attribute serialization"))
+					        .header(Header::new("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8"))
+					        .body("grant_type=password&username=admin&password=admin")
 					        .dispatch();
 					        
         assert_eq!(response.status(), Status::Ok);
 
 		// Panics if API key is not in valid UUID format 
-		let body: String = response.body_string().unwrap().replace("\"", "");
-		let api_key: &str = body.as_str();
-		println!("API key: {}", api_key);
-		Uuid::parse_str(api_key).unwrap();
+		let body: String = response.body_string().unwrap();
+
+		let access_token: AccessTokenResponse = serde_json::from_str(body.as_str()).unwrap();
+		println!("API key: {}", access_token.access_token);
+		Uuid::parse_str(access_token.access_token.as_str()).unwrap();
     }
     
     #[test]
@@ -461,29 +488,29 @@ mod tests {
         println!("Have rocket");
         
 		// Create user
-        let login = User {
-        	user : String::from("admin"),
+        let user = User {
+        	username : String::from("admin"),
         	password : String::from("admin"),
         };
         
         let response_add = client.post("/add_user")
         					.header(ContentType::JSON)
-					        .body(serde_json::to_string(&json!(&login)).expect("Attribute serialization"))
+					        .body(serde_json::to_string(&json!(&user)).expect("Attribute serialization"))
 					        .dispatch();
 					        
         assert_eq!(response_add.status(), Status::Ok);
 
         // Log in as user and get API ley
         let mut response = client.post("/login")
-					        .header(ContentType::JSON)
-					        .body(serde_json::to_string(&json!(&login)).expect("Attribute serialization"))
+					        .header(Header::new("Content-Type", "application/x-www-form-urlencoded"))
+					        .body("grant_type=password&username=admin&password=admin")
 					        .dispatch();
 					        
         assert_eq!(response.status(), Status::Ok);
-		let res = response.body_string().unwrap();
-        let api_key: String = res.to_string().replace("\"","");
 
-		println!("Got API key {}", api_key);
+		let body: String = response.body_string().unwrap();
+		let access_token: AccessTokenResponse = serde_json::from_str(body.as_str()).unwrap();
+		println!("API key: {}", access_token.access_token);
 
 		// Set up scheme
         let setup_msg: SetupMsg = SetupMsg {
@@ -491,7 +518,7 @@ mod tests {
         };
         let mut response = client.post("/setup")
 					        .header(ContentType::JSON)
-					        .header(Header::new("x-api-key", api_key.clone()))
+					        .header(Header::new("x-api-key", access_token.access_token.clone()))
 					        .body(serde_json::to_string(&json!(&setup_msg)).expect("Setting up bsw"))
 					        .dispatch();
 		assert_eq!(response.status(), Status::Ok);
@@ -506,7 +533,7 @@ mod tests {
 
         let response = client.post("/keygen")
 					        .header(ContentType::JSON)
-					        .header(Header::new("x-api-key", api_key.clone()))
+					        .header(Header::new("x-api-key", access_token.access_token.clone()))
 					        .body(serde_json::to_string(&json!(&msg)).expect("Attribute serialization"))
 					        .dispatch();				
 		assert_eq!(response.status(), Status::Ok);
@@ -516,28 +543,27 @@ mod tests {
     fn test_encrypt_decrypt() {
         let client = Client::new(rocket()).expect("valid rocket instance");
 
-        let login = User {
-        	user : String::from("admin"),
+        let user = User {
+        	username : String::from("admin"),
         	password : String::from("admin"),
         };
         
         let response_add = client.post("/add_user")
         					.header(ContentType::JSON)
-					        .body(serde_json::to_string(&json!(&login)).expect("Attribute serialization"))
+					        .body(serde_json::to_string(&json!(&user)).expect("Attribute serialization"))
 					        .dispatch();
 					        
         assert_eq!(response_add.status(), Status::Ok);
 
         let mut response = client.post("/login")
-					        .header(ContentType::JSON)
-					        .body(serde_json::to_string(&json!(&login)).expect("Attribute serialization"))
+					        .header(Header::new("Content-Type", "application/x-www-form-urlencoded"))
+					        .body("grant_type=password&username=admin&password=admin")
 					        .dispatch();
 					        
         assert_eq!(response.status(), Status::Ok);
-		let res = response.body_string().unwrap();
-        let api_key: String = res.to_string().replace("\"","");
-
-		println!("Got API key {}", api_key);
+		let body: String = response.body_string().unwrap();
+		let access_token: AccessTokenResponse = serde_json::from_str(body.as_str()).unwrap();
+		println!("API key: {}", access_token.access_token);
 
         let msg: KeyGenMsg = KeyGenMsg {
         	attributes: vec!("bla".to_string(), "blubb".to_string())
@@ -547,14 +573,14 @@ mod tests {
         let attr = vec!(["attribute_1", "attribute_2"]);
         let mut response = client.post("/keygen")
 					        .header(ContentType::JSON)
-					        .header(Header::new("x-api-key", api_key.clone()))
+					        .header(Header::new("x-api-key", access_token.access_token.clone()))
 					        .body(serde_json::to_string(&json!(&attr)).expect("Attribute serialization"))
 					        .dispatch();
 				
 		let secret_key : String = response.body_string().unwrap();
 		
         let mut resp_pk = client.get("/pk")
-					        .header(Header::new("x-api-key", api_key.clone()))
+					        .header(Header::new("x-api-key", access_token.access_token.clone()))
 					        .dispatch();
 		let pk = resp_pk.body_string().unwrap();
 
@@ -567,7 +593,7 @@ mod tests {
 		};
 		let mut resp_enc = client.post("/encrypt")
 					        .header(ContentType::JSON)
-					        .header(Header::new("x-api-key", api_key.clone()))
+					        .header(Header::new("x-api-key", access_token.access_token.clone()))
 					        .body(serde_json::to_string(&msg).expect("Encryption"))
 					        .dispatch();
 		
@@ -581,7 +607,7 @@ mod tests {
 		};
 		let mut resp_dec = client.post("/decrypt")
 					        .header(ContentType::JSON)
-					        .header(Header::new("x-api-key", api_key.clone()))
+					        .header(Header::new("x-api-key", access_token.access_token.clone()))
 					        .body(serde_json::to_string(&c).unwrap())
 					        .dispatch();
 		let pt_hex: String = resp_dec.body_string().unwrap();
