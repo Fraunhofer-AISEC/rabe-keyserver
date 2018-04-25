@@ -4,8 +4,7 @@ create table sessions (
 	user_id INT NOT NULL,
     session_id TEXT,
     scheme TEXT,
-    public_key TEXT,
-    private_key TEXT,
+    key_material TEXT,
     is_initialized TINYINT(1),
     FOREIGN KEY (user_id) REFERENCES users(id)
 )

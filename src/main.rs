@@ -3,6 +3,7 @@
 
 extern crate rocket;
 extern crate rabe;
+extern crate serde;
 extern crate serde_json;
 extern crate rustc_serialize;
 extern crate blake2_rfc;
@@ -92,7 +93,8 @@ struct SetupMsg {
 
 #[derive(Serialize, Deserialize)]
 struct KeyGenMsg {
-	attributes: Vec<String>
+	attributes: Vec<String>,
+	scheme: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -166,30 +168,6 @@ fn login(u: Form<TokenRequest>) -> Result<Json<AccessTokenResponse>, BadRequest<
 	return Err(BadRequest(Some(format!("Invalid"))))
 }
 
-
-#[post(path="/keygen", format="application/json", data="<d>")]
-fn keygen(d:Json<KeyGenMsg>, _key: ApiKey) -> Result<Json<String>, BadRequest<String>>  {
-    
-    let param: KeyGenMsg = d.into_inner();
-    
-    println!("Generating mk");
-    let msk = match get_mk() {
-    	Err(e) => return Err(BadRequest(Some(format!("msk failure: {}", e)))),
-    	Ok(r) => r
-    };
-    
-    println!("Generating pk");
-    let pk = match get_pk() {
-    	Err(e) => return Err(BadRequest(Some(format!("pk failure: {}", e)))),
-    	Ok(r) => r
-    };
-    let mut _attributes = param.attributes;
-    println!("Generating attributes");
-    let res:bsw::CpAbeSecretKey = bsw::keygen(&pk, &msk, &_attributes).unwrap();
-    println!("{:?}",serde_json::to_string(&res));
-    Ok(Json(serde_json::to_string(&res).unwrap()))
-}
-
 #[post(path="/encrypt", format="application/json", data="<d>")]
 fn encrypt(d:Json<EncMessage>, _key: ApiKey) -> Result<Json<String>, BadRequest<String>>  {
     let pk_hex : &String = &d.public_key;
@@ -235,12 +213,53 @@ fn setup(d:Json<SetupMsg>, key: ApiKey) -> Result<(String), BadRequest<String>> 
 	let param: SetupMsg = d.into_inner();
     let conn: MysqlConnection = db_connect();
     let user = db_get_user_of_apikey(&conn, &key.0);
-    let session_id: String = match db_get_session(&conn, &key.0.to_string(), &param.scheme) {
-    	Ok(sess) => sess.session_id,
-    	Err(_) => db_create_session(&conn, &user.username, &param.scheme).unwrap().to_string()
+    
+    // If there is already a session for this API key and the given scheme, return its id.
+    if let Ok(session) = db_get_session(&conn, &key.0.to_string(), &param.scheme) {
+    	return Ok(session.session_id); 
+    } else {
+    	// Setup of a new session. Create keys
+    	let keyGenParms = KeyGenMsg {
+    		attributes: vec!["bla".to_string()],
+    		scheme: "bsw".to_string()
+    	};
+    	let keyMaterial: Vec<String> = match keygen(keyGenParms) {
+    		Ok(material) => material,
+    		Err(e) => { return Err(BadRequest(Some(format!("Failure to create keys {}",e)))); }
+    	};
+		
+		// Write new session to database and return its id
+		let session = db_create_session(&conn, &user.username, &String::from("bsw"), &keyMaterial);
+		return Ok(session.unwrap());
+    }
+}
+
+fn keygen(param: KeyGenMsg) -> Result<Vec<String>, String> {
+	let scheme: String = param.scheme;
+	if scheme.ne("bsw") {	// TODO Support all other schemes besides bsw
+		println!("WARNING. Unsupported scheme {} demanded. Using bsw", scheme);
+	};
+
+    // Generating mk
+    let msk = match get_mk() {
+    	Err(e) => return Err(format!("msk failure: {}", e)),
+    	Ok(r) => r
     };
     
-    return Ok(session_id);
+    // Generating pk
+    let pk = match get_pk() {
+    	Err(e) => return Err(format!("pk failure: {}", e)),
+    	Ok(r) => r
+    };
+    let mut _attributes = param.attributes;
+    
+    //Generating attribute keys
+    let res:bsw::CpAbeSecretKey = bsw::keygen(&pk, &msk, &_attributes).unwrap();
+    
+    Ok(vec![serde_json::to_string(&pk).unwrap(),
+	    	serde_json::to_string(&msk).unwrap(),
+	    	serde_json::to_string(&res).unwrap()])
+    
 }
 
 fn generate_api_key() -> String {
@@ -310,7 +329,7 @@ fn db_add_user(conn: &MysqlConnection, username: &String, passwd: &String, salt:
         .execute(conn)
 }
 
-fn db_create_session(conn: &MysqlConnection, username: &String, scheme: &String) -> Result<String, String> {
+fn db_create_session(conn: &MysqlConnection, username: &String, scheme: &String, keyMaterial: &Vec<String>) -> Result<String, String> {
 	use schema::sessions;
 	println!("Got scheme {}", scheme);
 	if !SCHEMES.contains(&scheme.as_str()) {
@@ -320,14 +339,17 @@ fn db_create_session(conn: &MysqlConnection, username: &String, scheme: &String)
 	let user: schema::User = db_get_user(conn, username);
 	let session_id: String = OsRng::new().unwrap().next_u64().to_string();
 	
+	
+	
 	let session = schema::NewSession {
 		user_id: user.id,
 		is_initialized: false,
 		scheme: scheme.to_string(),
 		session_id: session_id.clone(),
-		public_key: "".to_string(),
-		private_key: "".to_string()
+		key_material: serde_json::to_string(keyMaterial).unwrap()
 	};
+	
+	println!("Key material is {}", session.key_material);
 	
 	// Return auto-gen'd session id
     match diesel::insert_into(sessions::table)
@@ -380,7 +402,7 @@ fn rocket() -> rocket::Rocket {
 	    }
 	});
 	
-    rocket::ignite().mount("/", routes![login, setup, pk, keygen, encrypt, decrypt, add_user])
+    rocket::ignite().mount("/", routes![login, setup, pk, encrypt, decrypt, add_user])
 }
 
 fn main() {
@@ -475,9 +497,16 @@ mod tests {
     	let salt: i32 = 1234;
     	db_add_user(&con, &user, &passwd, salt, &api_key).expect("Failure adding user");
 
+    	// Setup of a new session. Create keys
+    	let keyGenParms = KeyGenMsg {
+    		attributes: vec!["bla".to_string()],
+    		scheme: "bsw".to_string()
+    	};
+    	let key_material: Vec<String> = keygen(keyGenParms).unwrap();
+
 		let scheme: String = "bsw".to_string();
 
-		let session_id: String = db_create_session(&con, &user, &scheme).expect("Could not create session");
+		let session_id: String = db_create_session(&con, &user, &scheme, &key_material).expect("Could not create session");
 		println!("Got session id {}", session_id);
     }
     
@@ -526,8 +555,9 @@ mod tests {
 
 
         let msg: KeyGenMsg = KeyGenMsg {
-        	attributes: vec!("bla".to_string(), "blubb".to_string())
-        };
+        	attributes: vec!("bla".to_string(), "blubb".to_string()),
+		    scheme: "bsw".to_string()
+		};
         
         println!("Created test attributes");
 
@@ -566,8 +596,9 @@ mod tests {
 		println!("API key: {}", access_token.access_token);
 
         let msg: KeyGenMsg = KeyGenMsg {
-        	attributes: vec!("bla".to_string(), "blubb".to_string())
-        };
+        	attributes: vec!("bla".to_string(), "blubb".to_string()),
+	        scheme: "bsw".to_string()
+		};
 
 		// Create Sk for attribute set
         let attr = vec!(["attribute_1", "attribute_2"]);

@@ -16,8 +16,7 @@ table! {
 			user_id -> Integer,
 			session_id -> Text,
 			scheme -> Text,
-			public_key -> Text,
-			private_key -> Text,
+			key_material -> Text,
 			is_initialized -> Bool,
 		}
 }
@@ -52,8 +51,7 @@ pub struct Session {
 	pub user_id: i32,
 	pub session_id: String,
 	pub scheme: String,
-	pub public_key: String,
-	pub private_key: String,
+	pub key_material: String,
 	pub is_initialized: bool
 }
 #[derive(Queryable,Associations, PartialEq, Debug)]
@@ -65,7 +63,6 @@ pub struct NewSession {
 	pub user_id: i32,
 	pub session_id: String,
 	pub scheme: String,
-	pub public_key: String,
-	pub private_key: String,
+	pub key_material: String,
 	pub is_initialized: bool
 }
