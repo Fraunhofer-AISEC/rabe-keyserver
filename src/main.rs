@@ -89,6 +89,7 @@ struct Message {
 #[derive(Serialize, Deserialize)]
 struct SetupMsg {
 	scheme: String,
+	attributes: Vec<String>
 }
 
 #[derive(Serialize, Deserialize)]
@@ -100,14 +101,14 @@ struct KeyGenMsg {
 #[derive(Serialize, Deserialize)]
 struct EncMessage {
 	plaintext :Vec<u8>,
-	policy : String,
-	public_key : String
+	policy : String,			// A json serialized policy that is understood by the scheme assigned to the session
+	session_id : String			// Session ID unique per (user,scheme)
 }
 
 #[derive(Serialize, Deserialize)]
 struct DecMessage {
-	ct :String,
-	sk :String
+	ct: String,
+	session_id: String			// Session ID unique per (user,scheme)
 }
 
 #[derive(Serialize, Deserialize)]
@@ -169,21 +170,40 @@ fn login(u: Form<TokenRequest>) -> Result<Json<AccessTokenResponse>, BadRequest<
 }
 
 #[post(path="/encrypt", format="application/json", data="<d>")]
-fn encrypt(d:Json<EncMessage>, _key: ApiKey) -> Result<Json<String>, BadRequest<String>>  {
-    let pk_hex : &String = &d.public_key;
-    println!("Public key is {}", pk_hex);
-    let pk : bsw::CpAbePublicKey = serde_json::from_str(pk_hex.as_str()).unwrap();
+fn encrypt(d:Json<EncMessage>, _key: ApiKey) -> Result<Json<String>, BadRequest<String>>  {    
+    
+    // Get active session (panics if not available)
+    let conn = db_connect();
+    let session: schema::Session = db_get_session_by_id(&conn, &_key.0, &d.session_id).unwrap();
+    
+    // Get key material needed for encryption
+    let key_material: Vec<String> = serde_json::from_str(&session.key_material.as_str()).unwrap();
+    let pk_string : &String = &key_material[0];
+    let pk : bsw::CpAbePublicKey = serde_json::from_str(pk_string.as_str()).unwrap();	// TODO NotNice: need to convert to scheme-specific type here. Should be generic trait w/ function "KeyMaterial.get_public_key()"
     let res = bsw::encrypt(&pk, &d.policy, &d.plaintext).unwrap();
     Ok(Json(serde_json::to_string_pretty(&res).unwrap()))
 }
 
 #[post(path="/decrypt", format="application/json", data="<d>")]
-fn decrypt(d:Json<DecMessage>, _key: ApiKey) -> Result<Json<String>, BadRequest<String>>  {
-    let sk_hex : String = serde_json::from_str(&d.sk).unwrap();
-    let ct_hex : String = serde_json::from_str(&d.ct).unwrap();
-    println!("sk: {}", sk_hex);
-    let ct : bsw::CpAbeCiphertext = serde_json::from_str(ct_hex.as_str()).unwrap();
-    let sk : bsw::CpAbeSecretKey = serde_json::from_str(sk_hex.as_str()).unwrap();
+fn decrypt(d:Json<DecMessage>, key: ApiKey) -> Result<Json<String>, BadRequest<String>>  {
+    println!("Decryption demanded with ciphertext {}", &d.ct);
+        
+    // Get ciphertext. TODO NotNice: this still requires a scheme-specific cast to CpAbeCiphertext.
+    let ct : bsw::CpAbeCiphertext = serde_json::from_str(&d.ct).unwrap();
+	
+	// Get session from DB and extract key material needed for decryption
+	let conn = db_connect();
+    let session: schema::Session = db_get_session_by_id(&conn, &key.0, &d.session_id).unwrap();
+    let key_material_vec : Vec<String> = match serde_json::from_str(&session.key_material.as_str()) {
+	    Ok(k) => k,
+	    Err(e) => { println!("Error {}", e); panic!("Unwrapping {}", e); }
+    };
+
+	// TODO NotNice: Here we "know" that the third entry in the serialized vector of key material refers to the secret key, because this is how we serialized it before. Should be replaced by generic trait w/ function "KeyMaterial.get_secret_key()"
+	let secret_key_json: &String = &key_material_vec[2];
+    let sk: bsw::CpAbeSecretKey = serde_json::from_str(secret_key_json.as_str()).unwrap();
+	
+	// Decrypt ciphertext
     let res = bsw::decrypt(&sk, &ct).unwrap();
     let s = match str::from_utf8(&res) {
         Ok(v) => v,
@@ -196,13 +216,12 @@ fn decrypt(d:Json<DecMessage>, _key: ApiKey) -> Result<Json<String>, BadRequest<
 fn add_user(d:Json<User>) -> Result<(), BadRequest<String>>  {
     let ref username: String = d.username;
     let ref passwd: String = d.password;
-    let salt: i32 = 1234;	// TODO use random salt
+    let salt: i32 = 1234;	// TODO use random salt when storing hashed user passwords
     let api_key : String = generate_api_key();
     
     println!("Adding user {} {} {} {}", &username, &passwd, salt, &api_key); 
     
-    let conn = db_connect();
-	
+    let conn = db_connect();	
     match db_add_user(&conn, &username, &passwd, salt, &api_key) {
     	Err(e) => {println!("Nope! {}", e); return Err(BadRequest(Some(format!("Failure adding userpk failure: {}", e))))},
     	Ok(_r) => return Ok(())
@@ -214,22 +233,22 @@ fn setup(d:Json<SetupMsg>, key: ApiKey) -> Result<(String), BadRequest<String>> 
     let conn: MysqlConnection = db_connect();
     let user = db_get_user_of_apikey(&conn, &key.0);
     
-    // If there is already a session for this API key and the given scheme, return its id.
-    if let Ok(session) = db_get_session(&conn, &key.0.to_string(), &param.scheme) {
+    // If there is already a session for this API key and the given scheme, return its ID.
+    if let Ok(session) = db_get_session_by_user_scheme(&conn, &key.0.to_string(), &param.scheme) {
     	return Ok(session.session_id); 
     } else {
-    	// Setup of a new session. Create keys
-    	let keyGenParms = KeyGenMsg {
-    		attributes: vec!["bla".to_string()],
+    	// Setup of a new session. Create keys first
+    	let key_gen_params = KeyGenMsg {
+    		attributes: param.attributes,
     		scheme: "bsw".to_string()
     	};
-    	let keyMaterial: Vec<String> = match keygen(keyGenParms) {
+    	let key_material: Vec<String> = match keygen(key_gen_params) {	// TODO NotNice: keygen returns a vector of strings. Instead it should return some Box<KeyMaterial> with functions like get_public_key() etc.
     		Ok(material) => material,
     		Err(e) => { return Err(BadRequest(Some(format!("Failure to create keys {}",e)))); }
     	};
 		
 		// Write new session to database and return its id
-		let session = db_create_session(&conn, &user.username, &String::from("bsw"), &keyMaterial);
+		let session = db_create_session(&conn, &user.username, &String::from("bsw"), &key_material);
 		return Ok(session.unwrap());
     }
 }
@@ -262,6 +281,7 @@ fn keygen(param: KeyGenMsg) -> Result<Vec<String>, String> {
     
 }
 
+/// Generates a new API key in form of a random UUID
 fn generate_api_key() -> String {
 	return Uuid::new_v4().to_string();
 }
@@ -282,6 +302,7 @@ fn is_initialized() -> bool {
 	pk && mk
 }
 
+/// TODO Deprecated To be removed. Do not store keys in files.
 fn get_mk() -> BoxedResult<bsw::CpAbeMasterKey> {
 	let mut f = try!(File::open(MK_FILE));
 	let mut s: String = String::new();
@@ -290,6 +311,7 @@ fn get_mk() -> BoxedResult<bsw::CpAbeMasterKey> {
 	return Ok(mk);
 }
 
+/// TODO Deprecated To be removed. Do not store keys in files.
 fn get_pk() -> BoxedResult<bsw::CpAbePublicKey> {
 	let mut f = try!(File::open(PK_FILE));
 	let mut s: String = String::new();
@@ -298,6 +320,7 @@ fn get_pk() -> BoxedResult<bsw::CpAbePublicKey> {
 	return Ok(pk);
 }
 
+/// TODO Deprecated To be removed. Do not store keys in files.
 fn init_abe_setup() -> BoxedResult<()> {
 	 let (pk, mk): (bsw::CpAbePublicKey,bsw::CpAbeMasterKey) = bsw::setup();
 	 let mut f_mk = try!(File::create(MK_FILE));
@@ -311,9 +334,10 @@ fn init_abe_setup() -> BoxedResult<()> {
 
 fn db_connect() -> MysqlConnection {
 	let database_url : String = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
-	MysqlConnection::establish(&database_url).expect(&format!("Error connecting to {}", database_url))
+	MysqlConnection::establish(&database_url).expect(&format!("Error connecting to {}", database_url))	// TODO Replace MysqlConnection with more generic "Connection"?
 }
 
+/// Adds a user to database.
 fn db_add_user(conn: &MysqlConnection, username: &String, passwd: &String, salt: i32, api_key: &String) -> Result<usize, diesel::result::Error> {
 	use schema::users;
 	
@@ -329,7 +353,7 @@ fn db_add_user(conn: &MysqlConnection, username: &String, passwd: &String, salt:
         .execute(conn)
 }
 
-fn db_create_session(conn: &MysqlConnection, username: &String, scheme: &String, keyMaterial: &Vec<String>) -> Result<String, String> {
+fn db_create_session(conn: &MysqlConnection, username: &String, scheme: &String, key_material: &Vec<String>) -> Result<String, String> {
 	use schema::sessions;
 	println!("Got scheme {}", scheme);
 	if !SCHEMES.contains(&scheme.as_str()) {
@@ -346,7 +370,7 @@ fn db_create_session(conn: &MysqlConnection, username: &String, scheme: &String,
 		is_initialized: false,
 		scheme: scheme.to_string(),
 		session_id: session_id.clone(),
-		key_material: serde_json::to_string(keyMaterial).unwrap()
+		key_material: serde_json::to_string(key_material).unwrap()
 	};
 	
 	println!("Key material is {}", session.key_material);
@@ -360,13 +384,23 @@ fn db_create_session(conn: &MysqlConnection, username: &String, scheme: &String,
         }
 }
 
-fn db_get_session(conn: &MysqlConnection, api_key: &String, scheme: &String) -> Result<schema::Session, diesel::result::Error> {
+fn db_get_session_by_user_scheme(conn: &MysqlConnection, api_key: &String, scheme: &String) -> Result<schema::Session, diesel::result::Error> {
 	use schema::sessions;
 	
 	let user: schema::User = db_get_user_of_apikey(conn, api_key);
 	
 	 sessions::table.filter(sessions::user_id.eq(user.id))
 		 .filter(sessions::scheme.eq(scheme))
+        .first::<schema::Session>(conn)
+}
+
+fn db_get_session_by_id(conn: &MysqlConnection, api_key: &String, session_id: &String) -> Result<schema::Session, diesel::result::Error> {
+	use schema::sessions;
+	
+	let user: schema::User = db_get_user_of_apikey(conn, api_key);
+	
+	 sessions::table.filter(sessions::user_id.eq(user.id))
+		 .filter(sessions::session_id.eq(session_id))
         .first::<schema::Session>(conn)
 }
 
@@ -386,6 +420,7 @@ fn db_get_user_of_apikey<'a>(conn: &MysqlConnection, api_key: &'a String) -> sch
         .expect("Error loading users")
 }
 
+/// TODO Use to create salted hashed passwords
 fn to_db_passwd(plain_password: String, salt: i32) -> Blake2bResult {
 	 let salted_pwd = plain_password + &salt.to_string();
 	 let res = blake2b(64, &[], salted_pwd.as_bytes());
@@ -499,7 +534,7 @@ mod tests {
 
     	// Setup of a new session. Create keys
     	let keyGenParms = KeyGenMsg {
-    		attributes: vec!["bla".to_string()],
+    		attributes: vec!["attribute_1".to_string(), "attribute_2".to_string()],
     		scheme: "bsw".to_string()
     	};
     	let key_material: Vec<String> = keygen(keyGenParms).unwrap();
@@ -543,7 +578,8 @@ mod tests {
 
 		// Set up scheme
         let setup_msg: SetupMsg = SetupMsg {
-        	scheme: "bsw".to_string()
+        	scheme: "bsw".to_string(),
+        	attributes: vec!("attribute_1".to_string(), "attribute_2".to_string())        	
         };
         let mut response = client.post("/setup")
 					        .header(ContentType::JSON)
@@ -552,21 +588,6 @@ mod tests {
 					        .dispatch();
 		assert_eq!(response.status(), Status::Ok);
 		println!("SETUP RETURNED {}",response.body_string().unwrap());
-
-
-        let msg: KeyGenMsg = KeyGenMsg {
-        	attributes: vec!("bla".to_string(), "blubb".to_string()),
-		    scheme: "bsw".to_string()
-		};
-        
-        println!("Created test attributes");
-
-        let response = client.post("/keygen")
-					        .header(ContentType::JSON)
-					        .header(Header::new("x-api-key", access_token.access_token.clone()))
-					        .body(serde_json::to_string(&json!(&msg)).expect("Attribute serialization"))
-					        .dispatch();				
-		assert_eq!(response.status(), Status::Ok);
     }  
 
     #[test]
@@ -595,32 +616,32 @@ mod tests {
 		let access_token: AccessTokenResponse = serde_json::from_str(body.as_str()).unwrap();
 		println!("API key: {}", access_token.access_token);
 
-        let msg: KeyGenMsg = KeyGenMsg {
-        	attributes: vec!("bla".to_string(), "blubb".to_string()),
-	        scheme: "bsw".to_string()
-		};
-
-		// Create Sk for attribute set
-        let attr = vec!(["attribute_1", "attribute_2"]);
-        let mut response = client.post("/keygen")
+		// Set up scheme
+        let setup_msg: SetupMsg = SetupMsg {
+        	scheme: "bsw".to_string(),
+        	attributes: vec!("attribute_1".to_string(), "attribute_2".to_string())        	
+        };
+        let mut response = client.post("/setup")
 					        .header(ContentType::JSON)
 					        .header(Header::new("x-api-key", access_token.access_token.clone()))
-					        .body(serde_json::to_string(&json!(&attr)).expect("Attribute serialization"))
+					        .body(serde_json::to_string(&json!(&setup_msg)).expect("Setting up bsw"))
 					        .dispatch();
-				
-		let secret_key : String = response.body_string().unwrap();
+		assert_eq!(response.status(), Status::Ok);
+		let session_id : String = response.body_string().unwrap();
+		println!("Setup returned SessionID {}",session_id);
 		
         let mut resp_pk = client.get("/pk")
 					        .header(Header::new("x-api-key", access_token.access_token.clone()))
 					        .dispatch();
 		let pk = resp_pk.body_string().unwrap();
+		println!("This is how a public key looks: {}", pk);
 
 		// Encrypt some text for a policy
 		let policy:String = String::from(r#"{"AND": [{"ATT": "attribute_1"}, {"ATT": "attribute_2"}]}"#);
 		let msg : EncMessage = EncMessage { 
 			plaintext : "Encrypt me".into(),
 			policy : policy,
-			public_key : pk
+			session_id : session_id.clone()
 		};
 		let mut resp_enc = client.post("/encrypt")
 					        .header(ContentType::JSON)
@@ -630,11 +651,12 @@ mod tests {
 		
 		assert_eq!(resp_enc.status(), Status::Ok);
 		let ct:String = resp_enc.body_string().unwrap();
+		let ct_json = serde_json::from_str(&ct).unwrap();
 
 		// Decrypt again
 		let c : DecMessage = DecMessage { 
-			ct: ct,
-			sk: secret_key
+			ct: ct_json,
+			session_id: session_id.clone()
 		};
 		let mut resp_dec = client.post("/decrypt")
 					        .header(ContentType::JSON)
