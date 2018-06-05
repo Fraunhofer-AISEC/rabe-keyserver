@@ -60,14 +60,14 @@ impl<'t, 'r> FromRequest<'t, 'r> for ApiKey {
     type Error = ();
 
     fn from_request(request: &'t Request<'r>) -> Outcome<ApiKey, (Status,()), ()> {
-        let keys: Vec<_> = request.headers().get("x-api-key").collect();
+        let keys: Vec<_> = request.headers().get("Authorization").collect();
         if keys.len() != 1 {
             return Outcome::Failure((Status::BadRequest, ()));
         }
 
         println!("Got API key {}", keys[0]);
         let key = keys[0];
-        if !is_valid(keys[0]) {
+        if !is_valid(keys[0].to_string()) {
 //            return Outcome::Forward(());
             return Outcome::Failure((Status::Unauthorized, ()));
         }
@@ -424,7 +424,8 @@ fn db_get_user<'a>(conn: &MysqlConnection, user: &'a String) -> schema::User {
 fn db_get_user_of_apikey<'a>(conn: &MysqlConnection, api_key: &'a String) -> schema::User {
 	use schema::users;
 	
-	users::table.filter(users::api_key.eq(api_key))
+	let key : String = api_key.replace("Bearer ", "");
+	users::table.filter(users::api_key.eq(key))
         .first::<schema::User>(conn)
         .expect("Error loading users")
 }
@@ -461,11 +462,16 @@ fn main() {
 }
 
 /// Returns true if `key` is a valid API key string.
-fn is_valid(key: &str) -> bool {
+fn is_valid(key: String) -> bool {
 	use schema::users;
+	let k : String = match key.starts_with("Bearer ") {
+		true => key.replace("Bearer ", ""),
+		false => key
+	};
+	
 	let conn = db_connect();
 
-	match users::table.filter(users::api_key.eq(key))
+	match users::table.filter(users::api_key.eq(k))
         .first::<schema::User>(&conn) {
         	Ok(_user) => return true,
         	Err(_e) => return false
@@ -592,7 +598,7 @@ mod tests {
         };
         let mut response = client.post("/setup")
 					        .header(ContentType::JSON)
-					        .header(Header::new("x-api-key", access_token.access_token.clone()))
+					        .header(Header::new("Authorization", access_token.access_token.clone()))
 					        .body(serde_json::to_string(&json!(&setup_msg)).expect("Setting up bsw"))
 					        .dispatch();
 		assert_eq!(response.status(), Status::Ok);
@@ -632,7 +638,7 @@ mod tests {
         };
         let mut response = client.post("/setup")
 					        .header(ContentType::JSON)
-					        .header(Header::new("x-api-key", access_token.access_token.clone()))
+					        .header(Header::new("Authorization", "Bearer " + access_token.access_token.clone()))
 					        .body(serde_json::to_string(&json!(&setup_msg)).expect("Setting up bsw"))
 					        .dispatch();
 		assert_eq!(response.status(), Status::Ok);
@@ -640,7 +646,7 @@ mod tests {
 		println!("Setup returned SessionID {}",session_id);
 		
         let mut resp_pk = client.get("/pk")
-					        .header(Header::new("x-api-key", access_token.access_token.clone()))
+					        .header(Header::new("Authorization", "Bearer " + access_token.access_token.clone()))
 					        .dispatch();
 		let pk = resp_pk.body_string().unwrap();
 		println!("This is how a public key looks: {}", pk);
@@ -654,7 +660,7 @@ mod tests {
 		};
 		let mut resp_enc = client.post("/encrypt")
 					        .header(ContentType::JSON)
-					        .header(Header::new("x-api-key", access_token.access_token.clone()))
+					        .header(Header::new("Authorization", "Bearer " + access_token.access_token.clone()))
 					        .body(serde_json::to_string(&msg).expect("Encryption"))
 					        .dispatch();
 		
@@ -669,14 +675,14 @@ mod tests {
 		};
 		let mut resp_dec = client.post("/decrypt")
 					        .header(ContentType::JSON)
-					        .header(Header::new("x-api-key", access_token.access_token.clone()))
+					        .header(Header::new("Authorization", "Bearer " + access_token.access_token.clone()))
 					        .body(serde_json::to_string(&c).unwrap())
 					        .dispatch();
 		let pt_hex: String = resp_dec.body_string().unwrap();
 		println!("HEX: {}", pt_hex);
 		let mut pt: String = serde_json::from_str(&pt_hex).expect("From json");
 		pt = pt.trim().to_string();
-		println!("REUSL: {}", pt);
+		println!("RESULT: {}", pt);
 		assert_eq!(pt, "Encrypt me");
     }  
 }
