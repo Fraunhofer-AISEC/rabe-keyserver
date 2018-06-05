@@ -124,7 +124,7 @@ def version():
 
 def add_user(username, password):
 	json = { "username": username, "password": password }
-	simple_post_json("/add_user", json)
+	simple_post_json("add_user", json)
 
 def main():
 	check() or sys.exit(1)

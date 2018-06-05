@@ -338,8 +338,14 @@ fn db_connect() -> MysqlConnection {
 }
 
 /// Adds a user to database.
-fn db_add_user(conn: &MysqlConnection, username: &String, passwd: &String, salt: i32, api_key: &String) -> Result<usize, diesel::result::Error> {
+fn db_add_user(conn: &MysqlConnection, username: &String, passwd: &String, salt: i32, api_key: &String) -> Result<usize, String> {
 	use schema::users;
+	
+	 match users::table.filter(users::username.eq(username.to_string()))
+        .first::<schema::User>(conn) {
+        	Ok(_u) => return Err("User already exists".to_string()),
+        	Err(_e) => {}
+        };
 	
 	let user = schema::NewUser {
 		username: username.to_string(),
@@ -348,9 +354,12 @@ fn db_add_user(conn: &MysqlConnection, username: &String, passwd: &String, salt:
 		api_key: api_key.to_string()
 	};
 	
-    diesel::insert_into(users::table)
+    match diesel::insert_into(users::table)
         .values(&user)
-        .execute(conn)
+        .execute(conn) {
+        	Ok(id) => Ok(id),
+        	Err(_e) => Err("Could not insert user".to_string())
+        }
 }
 
 fn db_create_session(conn: &MysqlConnection, username: &String, scheme: &String, key_material: &Vec<String>) -> Result<String, String> {
