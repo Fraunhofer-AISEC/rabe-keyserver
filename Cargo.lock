@@ -4,7 +4,7 @@ version = "0.1.0"
 dependencies = [
  "blake2-rfc 0.2.18 (registry+https://github.com/rust-lang/crates.io-index)",
  "diesel 1.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "rabe 0.1.0",
+ "rabe 0.1.1",
  "rand 0.4.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "rocket 0.3.12 (registry+https://github.com/rust-lang/crates.io-index)",
  "rocket-simpleauth 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -436,7 +436,7 @@ dependencies = [
 
 [[package]]
 name = "rabe"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "arrayref 0.3.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "bincode 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
