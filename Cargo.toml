@@ -4,19 +4,23 @@ version = "0.1.0"
 authors = ["Julian Schuette <julian.schuette@aisec.fraunhofer.de>"]
 
 [dependencies]
-rocket = "0.3.8"
-rocket_codegen = "0.3.8"
+rocket = "0.3.12"
+rocket_codegen = "0.3.12"
 serde = "1.0"
 serde_json = "1.0"
 serde_derive = "1.0"
 rustc-serialize = "0.3"
 rocket-simpleauth = "0.3.0"
-diesel = { version = "1.1.0", features = ["mysql"] }
+diesel = { version = "1.2.0", features = ["mysql"] }	# NOTE: diesel 1.3.0 does not compile with latest nightly (5.6.2018). Do not run "cargo update"
 blake2-rfc = "0.2.17"
 rand = "0.4.2"
 uuid = { version = "0.6", features = ["v4"] }
-#rabe = { git = "ssh://git@git-int.aisec.fraunhofer.de/sas/rust-abe.git" }
-rabe = { path = "../rust-abe" }
+
+# Does not work because Cargo does not properly handle ssh auth
+#rabe = { git = "ssh://git@git-int.aisec.fraunhofer.de/sas/rust-abe.git", tag = "rest-api-f90c8209ffc38e29c676f41324f13cb64a3bdcc2" }
+
+# Instead we use r-abe from a git submodule that refers to a working revision of r-abe.
+rabe = { path = "./rust-abe" }
 
 [dependencies.rocket_contrib]
 default-features = false

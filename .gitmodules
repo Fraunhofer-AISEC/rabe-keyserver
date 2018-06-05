@@ -1,0 +1,3 @@
+[submodule "rust-abe"]
+	path = rust-abe
+	url = git@git-int.aisec.fraunhofer.de:sas/rust-abe.git
