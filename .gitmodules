@@ -1,3 +1,8 @@
 [submodule "rust-abe"]
 	path = rust-abe
 	url = git@git-int.aisec.fraunhofer.de:sas/rust-abe.git
+[submodule "docuapi-theme"]
+        path = documentation/themes/docuapi
+        url = documentation/themes/docuapi
+
+
