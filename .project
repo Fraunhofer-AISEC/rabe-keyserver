@@ -7,7 +7,6 @@
 	<buildSpec>
 		<buildCommand>
 			<name>com.github.rustdt.ide.core.Builder</name>
-			<triggers>clean,full,incremental,</triggers>
 			<arguments>
 			</arguments>
 		</buildCommand>

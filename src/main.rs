@@ -100,7 +100,7 @@ struct KeyGenMsg {
 
 #[derive(Serialize, Deserialize)]
 struct EncMessage {
-	plaintext :Vec<u8>,
+	plaintext :String,
 	policy : String,			// A json serialized policy that is understood by the scheme assigned to the session
 	session_id : String			// Session ID unique per (user,scheme)
 }
@@ -109,6 +109,10 @@ struct EncMessage {
 struct DecMessage {
 	ct: String,
 	session_id: String			// Session ID unique per (user,scheme)
+}
+#[derive(Serialize, Deserialize)]
+struct ListAttrMsg {
+	session_id : String			// Session ID unique per (user,scheme)
 }
 
 #[derive(Serialize, Deserialize)]
@@ -179,8 +183,11 @@ fn encrypt(d:Json<EncMessage>, _key: ApiKey) -> Result<Json<String>, BadRequest<
     // Get key material needed for encryption
     let key_material: Vec<String> = serde_json::from_str(&session.key_material.as_str()).unwrap();
     let pk_string : &String = &key_material[0];
+    let plaintext: &Vec<u8> = &d.plaintext.as_bytes().to_vec();
     let pk : bsw::CpAbePublicKey = serde_json::from_str(pk_string.as_str()).unwrap();	// TODO NotNice: need to convert to scheme-specific type here. Should be generic trait w/ function "KeyMaterial.get_public_key()"
-    let res = bsw::encrypt(&pk, &d.policy, &d.plaintext).unwrap();
+    println!("plaintext {:?}", plaintext);
+    println!("policy {:?}", &d.policy);
+    let res = bsw::encrypt(&pk, &d.policy, plaintext).unwrap();
     Ok(Json(serde_json::to_string_pretty(&res).unwrap()))
 }
 
@@ -227,6 +234,16 @@ fn add_user(d:Json<User>) -> Result<(), BadRequest<String>>  {
     	Ok(_r) => return Ok(())
     }
 }
+
+#[post(path="/list_attrs", format="application/json", data="<d>")]
+fn list_attrs(d:Json<ListAttrMsg>, key: ApiKey) -> Result<(String), BadRequest<String>> {
+	let param: ListAttrMsg = d.into_inner();
+    let conn: MysqlConnection = db_connect();
+    let session: schema::Session = db_get_session_by_id(&conn, &key.0, &param.session_id).unwrap();    
+	return Ok(session.key_material);   
+    
+}
+
 #[post(path="/setup", format="application/json", data="<d>")]
 fn setup(d:Json<SetupMsg>, key: ApiKey) -> Result<(String), BadRequest<String>> {
 	let param: SetupMsg = d.into_inner();
@@ -236,12 +253,15 @@ fn setup(d:Json<SetupMsg>, key: ApiKey) -> Result<(String), BadRequest<String>> 
     // If there is already a session for this API key and the given scheme, return its ID.
     if let Ok(session) = db_get_session_by_user_scheme(&conn, &key.0.to_string(), &param.scheme) {
     	return Ok(session.session_id); 
-    } else {
+    } else {    	
     	// Setup of a new session. Create keys first
     	let key_gen_params = KeyGenMsg {
     		attributes: param.attributes,
     		scheme: "bsw".to_string()
     	};
+    	
+    	println!("Creating key for {} attributes", key_gen_params.attributes.len());
+    	
     	let key_material: Vec<String> = match keygen(key_gen_params) {	// TODO NotNice: keygen returns a vector of strings. Instead it should return some Box<KeyMaterial> with functions like get_public_key() etc.
     		Ok(material) => material,
     		Err(e) => { return Err(BadRequest(Some(format!("Failure to create keys {}",e)))); }
@@ -447,7 +467,7 @@ fn rocket() -> rocket::Rocket {
 	    }
 	});
 	
-    rocket::ignite().mount("/", routes![login, setup, pk, encrypt, decrypt, add_user])
+    rocket::ignite().mount("/", routes![login, setup, pk, list_attrs, encrypt, decrypt, add_user])
 }
 
 fn main() {
@@ -638,7 +658,7 @@ mod tests {
         };
         let mut response = client.post("/setup")
 					        .header(ContentType::JSON)
-					        .header(Header::new("Authorization", "Bearer " + access_token.access_token.clone()))
+					        .header(Header::new("Authorization", "Bearer ".to_owned() + &access_token.access_token))
 					        .body(serde_json::to_string(&json!(&setup_msg)).expect("Setting up bsw"))
 					        .dispatch();
 		assert_eq!(response.status(), Status::Ok);
@@ -646,7 +666,7 @@ mod tests {
 		println!("Setup returned SessionID {}",session_id);
 		
         let mut resp_pk = client.get("/pk")
-					        .header(Header::new("Authorization", "Bearer " + access_token.access_token.clone()))
+					        .header(Header::new("Authorization", "Bearer ".to_owned() + &access_token.access_token))
 					        .dispatch();
 		let pk = resp_pk.body_string().unwrap();
 		println!("This is how a public key looks: {}", pk);
@@ -660,7 +680,7 @@ mod tests {
 		};
 		let mut resp_enc = client.post("/encrypt")
 					        .header(ContentType::JSON)
-					        .header(Header::new("Authorization", "Bearer " + access_token.access_token.clone()))
+					        .header(Header::new("Authorization", "Bearer ".to_owned() + &access_token.access_token))
 					        .body(serde_json::to_string(&msg).expect("Encryption"))
 					        .dispatch();
 		
@@ -675,7 +695,7 @@ mod tests {
 		};
 		let mut resp_dec = client.post("/decrypt")
 					        .header(ContentType::JSON)
-					        .header(Header::new("Authorization", "Bearer " + access_token.access_token.clone()))
+					        .header(Header::new("Authorization", "Bearer ".to_owned() + &access_token.access_token))
 					        .body(serde_json::to_string(&c).unwrap())
 					        .dispatch();
 		let pt_hex: String = resp_dec.body_string().unwrap();

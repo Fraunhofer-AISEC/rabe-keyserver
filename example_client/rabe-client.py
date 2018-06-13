@@ -1,4 +1,31 @@
 #!/usr/bin/env python3
+##########################################################################
+#
+#	Example client for the r-ABE attribute based encryption REST service
+#
+#
+#   ############### Dependencies ###############
+#   	pip3 install requests_oauthlib requests_toolbelt
+#   ############################################
+#
+#
+#	Use as follows:
+#
+#   # setting up a new scheme of type "bsw". Attributes assigned to the user are space-separated
+#   $python3 ./rabe-client.py scheme_setup bsw TEST1 TEST2 
+#   11984071560866280529
+#   
+#   # The returned value is your session_id for that scheme
+#
+#   # Encrypt the string "test" for attribute TEST1 and store result in an env variable:
+#   $CIPHER=`./rabe-client.py encrypt test "{\"ATT\": \"TEST1\"}" 11984071560866280529`
+#
+#   # Decrypt the string "test" for attributes TEST1 and TEST2:
+#   $./rabe-client.py decrypt "$CIPHER" 8777877240608612071
+#
+#
+##########################################################################
+
 import sys
 import os
 import json
@@ -14,22 +41,16 @@ from requests_toolbelt import MultipartEncoder, MultipartEncoderMonitor
 import progressbar
 
 
-# ############### Dependencies ###############
-# 	pip3 install requests_oauthlib requests_toolbelt progressbar2
-# ############################################
 
 ########################################################################
 
 BASE_URL = "http://localhost:8000"
 
 # HTTP Basic Auth
-#auth=('admin', 'admin')
 auth=None
 
 username = 'admin'
 password = 'admin'
-#password = password_new
-#password = 'FollowthewhiteraBBit!'
 
 session=None
 ########################################################################
@@ -132,7 +153,6 @@ def add_user(username, password):
 
 
 def scheme_setup(scheme, json_attributes):
-	print(json_attributes)
 	data = {"scheme": scheme, "attributes": json_attributes}
 	print(simple_post_json("setup", data))
 
@@ -146,8 +166,8 @@ def encrypt(plaintext, policy, session_id):
 	print(simple_post_json("encrypt", data))
 
 
-def decrypt(plaintext, policy, session_id):
-	data = {"plaintext": plaintext, "session_id": session_id}
+def decrypt(ciphertext, session_id):
+	data = {"ct": ciphertext, "session_id": session_id}
 	print(simple_post_json("decrypt", data))
 
 
@@ -160,7 +180,7 @@ def main():
 			print("available commands:")
 			print("\t adduser <username> <password>")
 			print("\t scheme_setup <scheme> <attributes>")
-			print("\t public_key")
+			print("\t public_key <session_id>")
 			print("\t encrypt <plaintext> <policy> <session_id>")
 			print("\t decrypt <ciphertext> <session_id>")
 		elif sys.argv[1] in ['version']:
@@ -176,8 +196,8 @@ def main():
 				return
 			scheme_setup(sys.argv[2], sys.argv[3:])
 		elif sys.argv[1] in ['public_key']:
-			if len(sys.argv) > 2:
-				print("wrong syntax. Please use: " + sys.argv[0] + " public_key")
+			if len(sys.argv) != 3:
+				print("wrong syntax. Please use: " + sys.argv[0] + " public_key <session_id>")
 				return
 			public_key()
 		elif sys.argv[1] in ['encrypt']:
