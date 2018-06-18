@@ -1,0 +1,78 @@
+baseurl = "https://www.github.com/FraunhoferAISEC/rabe-keyserver"
+languageCode = "en-us"
+title = "R-ABE Keyserver API"
+theme = "hugo-material-docs"
+metadataformat = "yaml"
+canonifyurls = true
+# Enable Google Analytics by entering your tracking id
+googleAnalytics = ""
+
+[params]
+	# General information
+	author = "Fraunhofer AISEC"
+	description = "R-ABE Keyserver"
+	copyright = ""
+
+	# Repository
+	provider = "Fraunhofer AISEC"
+	repo_url = "https://www.aisec.fraunhofer.de"
+
+	version = "0.1.0"
+	logo = "images/logo.png"
+	favicon = ""
+
+	permalink = "#"
+
+	# Custom assets
+	custom_css = []
+	custom_js  = []
+
+	# Syntax highlighting theme
+	highlight_css  = ""
+
+	[params.palette]
+    	primary = "blue-grey"
+    	accent  = "teal"
+
+    [params.font]
+    	text = "Ubuntu"
+    	code = "Ubuntu Mono"
+
+
+[social]
+	twitter = ""
+	github  = "FraunhoferAISEC"
+	email   = ""
+
+
+#[[menu.main]]
+	#name   = "Overview"
+	#url    = "/"
+	#weight = 10
+
+[[menu.main]]
+	name   = "Getting started"
+	url    = "getting-started/"
+	weight = 10
+
+[[menu.main]]
+	name   = "Setup"
+	url    = "setup/"
+	weight = 20
+
+[[menu.main]]
+	name   = "Usage"
+	url    = "usage/"
+	weight = 30
+
+[[menu.main]]
+	name   = "License"
+	url    = "license/"
+	weight = 40
+
+
+[blackfriday]
+	smartypants	= true
+	fractions = true
+	smartDashes = true
+	plainIDAnchors = true
