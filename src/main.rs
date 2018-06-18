@@ -30,7 +30,6 @@ use rocket::outcome::Outcome;
 use diesel::*;
 use std::str;
 use std::io::Read;
-use std::io::Write;
 use std::env;
 use rabe::schemes::bsw;
 use blake2_rfc::blake2b::*;
@@ -44,8 +43,7 @@ pub mod schema;
 type BoxedResult<T> = std::result::Result<T, Box<Error>>;
 
 static START: Once = ONCE_INIT;
-static MK_FILE: &'static str = "abe-mk";
-static PK_FILE: &'static str = "abe-pk";
+
 
 const SCHEMES: &'static [&'static str] = &["bsw"];
 
@@ -87,7 +85,6 @@ struct Message {
 
 #[derive(Serialize, Deserialize)]
 struct SetupMsg {
-	username: String,
 	scheme: String,
 	attributes: Vec<String>
 }
@@ -144,18 +141,6 @@ struct AccessTokenResponse {
 // -----------------------------------------------------
 //               REST APIs follow
 // -----------------------------------------------------
-
-/// Retrieves the public key for the current session.
-//
-/// Return a BadRequest error in case the public key is (not) available (yet).
-///
-#[get(path="/pk")]
-fn pk(_key: ApiKey) -> Result<String, BadRequest<String>> {
-	 match get_pk() {
-	 	Ok(pk) => Ok(serde_json::to_string(&pk).unwrap()),
-	 	Err(_) => Err(BadRequest(Some("Failure".to_string())))
-	 }
-}
 
 #[post("/login", format = "application/x-www-form-urlencoded; charset=UTF-8", data = "<u>")]
 fn login(u: Form<TokenRequest>) -> Result<Json<AccessTokenResponse>, BadRequest<String>>  {
@@ -256,28 +241,23 @@ fn setup(d:Json<SetupMsg>) -> Result<(String), BadRequest<String>> {
 	let param: SetupMsg = d.into_inner();
     let conn: MysqlConnection = db_connect();
 	let attributes: String = serde_json::to_string(&param.attributes).unwrap();
-    
-    // If there is already a session for this API key and the given scheme, return its ID.
-    if let Some(session) = db_get_session_by_user_scheme(&conn, &param.username, &param.scheme) {
-    	return Ok(session.random_session_id); 
-    } else {    	
-    	// Setup of a new session. Create keys first
-    	let key_gen_params = KeyGenMsg {
-    		attributes: param.attributes,
-    		scheme: "bsw".to_string()
-    	};
-    	
-    	println!("Creating key for {} attributes", key_gen_params.attributes.len());
-    	
-    	let key_material: Vec<String> = match _keygen(key_gen_params) {	// TODO NotNice: keygen returns a vector of strings. Instead it should return some Box<KeyMaterial> with functions like get_public_key() etc.
-    		Ok(material) => material,
-    		Err(e) => { return Err(BadRequest(Some(format!("Failure to create keys {}",e)))); }
-    	};
-		
-		// Write new session to database and return its id
-		let session = db_create_session(&conn, &String::from("bsw"), &key_material, &attributes);
-		return Ok(session.unwrap());
-    }
+   	
+	// Setup of a new session. Create keys first
+	let key_gen_params = KeyGenMsg {
+		attributes: param.attributes,
+		scheme: "bsw".to_string()
+	};
+	
+	println!("Creating key for {} attributes", key_gen_params.attributes.len());
+	
+	let key_material: Vec<String> = match _keygen(key_gen_params) {	// TODO NotNice: keygen returns a vector of strings. Instead it should return some Box<KeyMaterial> with functions like get_public_key() etc.
+		Ok(material) => material,
+		Err(e) => { return Err(BadRequest(Some(format!("Failure to create keys {}",e)))); }
+	};
+
+	// Write new session to database and return its id
+	let session = db_create_session(&conn, &String::from("bsw"), &key_material, &attributes);
+	return Ok(session.unwrap());
 }
 
 fn _keygen(param: KeyGenMsg) -> Result<Vec<String>, String> {
@@ -287,23 +267,14 @@ fn _keygen(param: KeyGenMsg) -> Result<Vec<String>, String> {
 	};
 
     // Generating mk
-    let msk = match get_mk() {
-    	Err(e) => return Err(format!("msk failure: {}", e)),
-    	Ok(r) => r
-    };
-    
-    // Generating pk
-    let pk = match get_pk() {
-    	Err(e) => return Err(format!("pk failure: {}", e)),
-    	Ok(r) => r
-    };
+	let (pk, mk): (bsw::CpAbePublicKey,bsw::CpAbeMasterKey) = bsw::setup();
     let mut _attributes = param.attributes;
     
     //Generating attribute keys
-    let res:bsw::CpAbeSecretKey = bsw::keygen(&pk, &msk, &_attributes).unwrap();
+    let res:bsw::CpAbeSecretKey = bsw::keygen(&pk, &mk, &_attributes).unwrap();
     
     Ok(vec![serde_json::to_string(&pk).unwrap(),
-	    	serde_json::to_string(&msk).unwrap(),
+	    	serde_json::to_string(&mk).unwrap(),
 	    	serde_json::to_string(&res).unwrap()])
     
 }
@@ -312,27 +283,6 @@ fn _keygen(param: KeyGenMsg) -> Result<Vec<String>, String> {
 //                    Internal methods follow
 // ------------------------------------------------------------
 
-fn is_initialized() -> bool {
-	let mk : bool = match metadata(MK_FILE) {
-		Ok(meta) => meta.is_file(),
-		Err(_e) => false
-	};
-	let pk : bool = match metadata(PK_FILE) {
-		Ok(meta) => meta.is_file(),
-		Err(_e) => false
-	};
-	pk && mk
-}
-
-/// TODO Deprecated To be removed. Do not store keys in files.
-fn get_mk() -> BoxedResult<bsw::CpAbeMasterKey> {
-	let mut f = try!(File::open(MK_FILE));
-	let mut s: String = String::new();
-	f.read_to_string(&mut s)?;
-	let mk: bsw::CpAbeMasterKey = serde_json::from_str(&mut s).unwrap();
-	return Ok(mk);
-}
-
 /// TODO Deprecated To be removed. Do not store keys in files.
 fn get_pk() -> BoxedResult<bsw::CpAbePublicKey> {
 	let mut f = try!(File::open(PK_FILE));
@@ -340,18 +290,6 @@ fn get_pk() -> BoxedResult<bsw::CpAbePublicKey> {
 	f.read_to_string(&mut s)?;
 	let pk: bsw::CpAbePublicKey = serde_json::from_str(&mut s).unwrap();
 	return Ok(pk);
-}
-
-/// TODO Deprecated To be removed. Do not store keys in files.
-fn init_abe_setup() -> BoxedResult<()> {
-	 let (pk, mk): (bsw::CpAbePublicKey,bsw::CpAbeMasterKey) = bsw::setup();
-	 let mut f_mk = try!(File::create(MK_FILE));
-	 let mut f_pk = try!(File::create(PK_FILE));
-	 let hex_mk : String =try!(serde_json::to_string_pretty(&mk));
-	 let hex_pk : String =try!(serde_json::to_string_pretty(&pk));
-	 f_mk.write(hex_mk.as_bytes())?;
-	 f_pk.write(hex_pk.as_bytes())?;
-	 Ok(())
 }
 
 fn db_connect() -> MysqlConnection {
@@ -473,27 +411,27 @@ fn _to_db_passwd(plain_password: String, salt: i32) -> Blake2bResult {
 }
 
 fn rocket() -> rocket::Rocket {
-	START.call_once(|| {
-	    if !is_initialized() {
-	    	match init_abe_setup() {
-	    		Err(_e) => panic!("Could not initialize"),
-	    		Ok(()) => {}
-	    	}
-	    }
-	});
+	// START.call_once(|| {
+	//     if !is_initialized() {
+	//     	match init_abe_setup() {
+	//     		Err(_e) => panic!("Could not initialize"),
+	//     		Ok(()) => {}
+	//     	}
+	//     }
+	// });
 	
-    rocket::ignite().mount("/", routes![login, setup, pk, list_attrs, encrypt, decrypt, add_user])
+    rocket::ignite().mount("/", routes![login, setup, list_attrs, encrypt, decrypt, add_user])
 }
 
 fn main() {
     rocket().launch();
     
-    if !is_initialized() {
-    	match init_abe_setup() {
-    		Err(_e) => panic!("Could not initialize"),
-    		Ok(()) => {}
-    	}
-    }
+    // if !is_initialized() {
+    // 	match init_abe_setup() {
+    // 		Err(_e) => panic!("Could not initialize"),
+    // 		Ok(()) => {}
+    // 	}
+    // }
 }
 
 /// Returns true if `key` is a valid API key string.
@@ -616,7 +554,6 @@ mod tests {
         
 		// Set up scheme
         let setup_msg: SetupMsg = SetupMsg {
-        	username: "admin".to_string(),
 			scheme: "bsw".to_string(),
         	attributes: vec!("attribute_1".to_string(), "attribute_2".to_string())        	
         };
@@ -672,7 +609,6 @@ mod tests {
 
 		// Set up scheme
         let setup_msg: SetupMsg = SetupMsg {
-			username: "admin".to_string(),
         	scheme: "bsw".to_string(),
         	attributes: vec!("attribute_1".to_string(), "attribute_2".to_string())        	
         };
