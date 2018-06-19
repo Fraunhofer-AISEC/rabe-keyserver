@@ -2,21 +2,21 @@
 <rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
   <channel>
     <title>R-ABE Keyserver API</title>
-    <link>https://www.github.com/FraunhoferAISEC/rabe-keyserver/</link>
+    <link>https://julianschuette.github.io/rabe-keyserver/</link>
     <description>Recent content on R-ABE Keyserver API</description>
     <generator>Hugo -- gohugo.io</generator>
     <language>en-us</language>
     <lastBuildDate>Thu, 08 Mar 2018 21:07:13 +0100</lastBuildDate>
     
-	<atom:link href="https://www.github.com/FraunhoferAISEC/rabe-keyserver/index.xml" rel="self" type="application/rss+xml" />
+	<atom:link href="https://julianschuette.github.io/rabe-keyserver/index.xml" rel="self" type="application/rss+xml" />
     
     
     <item>
       <title>R-ABE Keyserver</title>
-      <link>https://www.github.com/FraunhoferAISEC/rabe-keyserver/</link>
+      <link>https://julianschuette.github.io/rabe-keyserver/</link>
       <pubDate>Thu, 08 Mar 2018 21:07:13 +0100</pubDate>
       
-      <guid>https://www.github.com/FraunhoferAISEC/rabe-keyserver/</guid>
+      <guid>https://julianschuette.github.io/rabe-keyserver/</guid>
       <description>Welcome to the R-ABE Keyserver API! This REST API wraps the attribute based encryption (ABE) schemes of the R-ABE library and can be used to set up an ABE key server. Currently, the keyserver API supports only the &amp;ldquo;BSW&amp;rdquo; scheme, as described in [1], but we plan to add support for all six schemes implemented by R-ABE.
 Note that the API is still under development and must not be used in production.</description>
     </item>
