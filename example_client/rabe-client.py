@@ -18,10 +18,10 @@
 #   # The returned value is your session_id for that scheme
 #
 #   # Encrypt the string "test" for attribute TEST1 and store result in an env variable:
-#   $CIPHER=`./rabe-client.py encrypt test "{\"ATT\": \"TEST1\"}" 11984071560866280529`
+#   $CIPHER=`python3 ./rabe-client.py encrypt test "{\"ATT\": \"TEST1\"}" 11984071560866280529`
 #
 #   # Decrypt the string "test" for attributes TEST1 and TEST2:
-#   $./rabe-client.py decrypt "$CIPHER" 8777877240608612071
+#   $python3 ./rabe-client.py decrypt "$CIPHER" 8777877240608612071
 #
 #
 ##########################################################################
@@ -46,9 +46,6 @@ import progressbar
 
 BASE_URL = "http://localhost:8000"
 
-# HTTP Basic Auth
-auth=None
-
 username = 'admin'
 password = 'admin'
 
@@ -66,15 +63,16 @@ def check():
 		return False
 
 
-def get_oauth_session():
-	if "https://" not in BASE_URL:
-		os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1' 	# Just for testing, to allow plaintext HTTP
-
-	# OAuth2 token request according to "Resource Owner Password Credentials" flow (RFC 6749)
-	client = LegacyApplicationClient(client_id=username)
-	oauth = OAuth2Session(client=client)
-	token = oauth.fetch_token(token_url=BASE_URL + '/login', username=username, password=password, auth=auth)
-	return oauth
+# Unused at the moment
+#def get_oauth_session():
+	#if "https://" not in BASE_URL:
+		#os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1' 	# Just for testing, to allow plaintext HTTP
+#
+	## OAuth2 token request according to "Resource Owner Password Credentials" flow (RFC 6749)
+	#client = LegacyApplicationClient(client_id=username)
+	#oauth = OAuth2Session(client=client)
+	#token = oauth.fetch_token(token_url=BASE_URL + '/login', username=username, password=password, auth=auth)
+	#return oauth
 
 
 def simple_get_request(call, *params, authorize=False):
@@ -84,7 +82,8 @@ def simple_get_request(call, *params, authorize=False):
 			req += p
 		else:
 			req += "/" + p
-	session = get_oauth_session()
+	#session = get_oauth_session()
+	session = requests.Session()
 
 	response = session.get(req, verify=False, auth=auth)
 
@@ -104,7 +103,8 @@ def simple_get_request(call, *params, authorize=False):
 
 def simple_post_json(call, data, authorize=False):
 	req = "{0}/{1}".format(BASE_URL, call)
-	session = get_oauth_session()
+	#session = get_oauth_session()
+	session = requests.Session()
 	response = session.post(req, json=data, verify=False, auth=auth)
 
 	try:
@@ -167,7 +167,7 @@ def encrypt(plaintext, policy, session_id):
 
 
 def decrypt(ciphertext, session_id):
-	data = {"ct": ciphertext, "session_id": session_id}
+	data = {"ct": ciphertext, "session_id": session_id, "username": username, "password": password}
 	print(simple_post_json("decrypt", data))
 
 

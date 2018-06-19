@@ -35,7 +35,7 @@ googleAnalytics = ""
     	accent  = "teal"
 
     [params.font]
-    	text = "Ubuntu"
+    	text = "Ubuntu,20"
     	code = "Ubuntu Mono"
 
 
@@ -55,15 +55,15 @@ googleAnalytics = ""
 	url    = "getting-started/"
 	weight = 10
 
-[[menu.main]]
-	name   = "Setup"
-	url    = "setup/"
-	weight = 20
-
-[[menu.main]]
-	name   = "Usage"
-	url    = "usage/"
-	weight = 30
+#[[menu.main]]
+	#name   = "Setup"
+	#url    = "setup/"
+	#weight = 20
+#
+#[[menu.main]]
+	#name   = "Usage"
+	#url    = "usage/"
+	#weight = 30
 
 [[menu.main]]
 	name   = "License"

@@ -14,7 +14,6 @@ rocket-simpleauth = "0.3.0"
 diesel = { version = "1.2.0", features = ["mysql"] }	# NOTE: diesel 1.3.0 does not compile with latest nightly (5.6.2018). Do not run "cargo update"
 blake2-rfc = "0.2.17"
 rand = "0.4.2"
-uuid = { version = "0.6", features = ["v4"] }
 
 # Does not work because Cargo does not properly handle ssh auth
 #rabe = { git = "ssh://git@git-int.aisec.fraunhofer.de/sas/rust-abe.git", tag = "rest-api-f90c8209ffc38e29c676f41324f13cb64a3bdcc2" }

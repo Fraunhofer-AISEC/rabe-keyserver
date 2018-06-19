@@ -7,6 +7,7 @@ table! {
 			username -> Text,
 			password -> Text,
 			attributes -> Text,
+			key_material -> Text,
 			salt -> Integer,
 		}
 }
@@ -36,6 +37,7 @@ pub struct User {
     pub username: String,
     pub password: String,
 	pub attributes: String,
+	pub key_material: String,
     pub salt: i32,
 }
 
@@ -48,6 +50,7 @@ pub struct NewUser{
     pub username: String,
     pub password: String,
 	pub attributes: String,
+	pub key_material: String,
     pub salt: i32,
 }
 

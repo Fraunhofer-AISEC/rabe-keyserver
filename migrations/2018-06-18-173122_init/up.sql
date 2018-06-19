@@ -14,6 +14,7 @@ create table users (
     username varchar(255) NOT NULL,
     password varchar(255) NOT NULL,
     attributes TEXT,
+    key_material TEXT,
     salt integer NOT NULL,
     api_key varchar(255) NOT NULL,
     FOREIGN KEY (session_id) REFERENCES sessions(id)

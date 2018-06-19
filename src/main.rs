@@ -9,7 +9,6 @@ extern crate rustc_serialize;
 extern crate blake2_rfc;
 extern crate rocket_simpleauth;
 extern crate rand;
-extern crate uuid;
 
 #[macro_use] extern crate rocket_contrib;
 #[macro_use] extern crate serde_derive;
@@ -33,8 +32,6 @@ use std::io::Read;
 use std::env;
 use rabe::schemes::bsw;
 use blake2_rfc::blake2b::*;
-use uuid::Uuid;
-
 
 pub mod schema;
 
@@ -105,7 +102,9 @@ struct EncMessage {
 #[derive(Serialize, Deserialize)]
 struct DecMessage {
 	ct: String,
-	session_id: String			// Session ID unique per (user,scheme)
+	session_id: String,			// Session ID unique per (user,scheme)
+	username: String,
+	password: String
 }
 #[derive(Serialize, Deserialize)]
 struct ListAttrMsg {
@@ -114,57 +113,17 @@ struct ListAttrMsg {
 }
 
 #[derive(Serialize, Deserialize)]
-#[derive(FromForm)]
 struct User {
 	username: String,
 	password: String,
+	attributes: Vec<String>,
 	random_session_id: String		// Reference to session
-}
-
-/// OAuth (RFC6749) token request to /login endpoint
-#[derive(Serialize, Deserialize)]
-#[derive(FromForm)]
-struct TokenRequest {
-	grant_type: String,
-	username: String,
-	password: String,
-}
-
-/// OAuth (RFC6749) token reponse from /login endpoint
-#[derive(Serialize, Deserialize)]
-struct AccessTokenResponse {
-   access_token: String,
-   token_type: String,
-   expires_in: u32
 }
 
 // -----------------------------------------------------
 //               REST APIs follow
 // -----------------------------------------------------
 
-#[post("/login", format = "application/x-www-form-urlencoded; charset=UTF-8", data = "<u>")]
-fn login(u: Form<TokenRequest>) -> Result<Json<AccessTokenResponse>, BadRequest<String>>  {
-	let user: &TokenRequest = u.get();
-	let conn = db_connect();	
-	let user_scheme: Vec<&str> = user.username.split('_').collect();
-	let username: &String = &user_scheme[0].to_string();
-	let scheme: &String = &user_scheme[1].to_string();
-
-	let db_user = db_get_user_by_username(&conn, username);
-	if user.password == db_user.unwrap().password {	// TODO compare salted hashes of pwd usng to_db_passwd()
-
-		let session: schema::Session = db_get_session_by_user_scheme(&conn, &username, &scheme).unwrap();
-		let token_response = AccessTokenResponse {
-		   access_token: String::from(session.random_session_id),
-		   token_type: String::from("bearer"),
-		   expires_in: 60*60*24*356
-		};
-		
-		return Ok(Json(token_response));
-	}
-	println!("Invalid login {}/{}", &user.username, &user.password);
-	return Err(BadRequest(Some(format!("Invalid"))))
-}
 
 #[post(path="/encrypt", format="application/json", data="<d>")]
 fn encrypt(d:Json<EncMessage>) -> Result<Json<String>, BadRequest<String>>  {    
@@ -187,29 +146,27 @@ fn encrypt(d:Json<EncMessage>) -> Result<Json<String>, BadRequest<String>>  {
 #[post(path="/decrypt", format="application/json", data="<d>")]
 fn decrypt(d:Json<DecMessage>) -> Result<Json<String>, BadRequest<String>>  {
     println!("Decryption demanded with ciphertext {}", &d.ct);
-        
-    // Get ciphertext. TODO NotNice: this still requires a scheme-specific cast to CpAbeCiphertext.
-    let ct : bsw::CpAbeCiphertext = serde_json::from_str(&d.ct).unwrap();
 	
 	// Get session from DB and extract key material needed for decryption
 	let conn = db_connect();
     let session: schema::Session = db_get_session_by_api_key(&conn, &d.session_id).unwrap();
-    let key_material_vec : Vec<String> = match serde_json::from_str(&session.key_material.as_str()) {
-	    Ok(k) => k,
-	    Err(e) => { println!("Error {}", e); panic!("Unwrapping {}", e); }
-    };
+	let users: Vec<schema::User> = _db_get_users_by_apikey(&conn, &d.session_id);
+	let user: schema::User = users.into_iter().take_while(|u| u.username.eq(&d.username)).next().unwrap();
+	let key_material: String = user.key_material;
 
-	// TODO NotNice: Here we "know" that the third entry in the serialized vector of key material refers to the secret key, because this is how we serialized it before. Should be replaced by generic trait w/ function "KeyMaterial.get_secret_key()"
-	let secret_key_json: &String = &key_material_vec[2];
-    let sk: bsw::CpAbeSecretKey = serde_json::from_str(secret_key_json.as_str()).unwrap();
-	
-	// Decrypt ciphertext
-    let res = bsw::decrypt(&sk, &ct).unwrap();
-    let s = match str::from_utf8(&res) {
-        Ok(v) => v,
-        Err(e) => panic!("Invalid UTF-8 sequence: {}", e),
-    };
-    Ok(Json(s.to_string()))
+	if session.scheme.eq("bsw") {
+		let ct: bsw::CpAbeCiphertext = serde_json::from_str(&d.ct).unwrap();
+		let sk: bsw::CpAbeSecretKey = serde_json::from_str(&key_material).unwrap();
+		
+		// Decrypt ciphertext
+		let res = bsw::decrypt(&sk, &ct).unwrap();
+		let s = match str::from_utf8(&res) {
+			Ok(v) => v,
+			Err(e) => panic!("Invalid UTF-8 sequence: {}", e),
+		};
+		return Ok(Json(s.to_string()))
+	}
+	return Err(BadRequest(Some(format!("Unsupported scheme {} of session {}", session.scheme, session.random_session_id))));
 }
 
 #[post(path="/add_user", format="application/json", data="<d>")]
@@ -221,11 +178,22 @@ fn add_user(d:Json<User>) -> Result<(), BadRequest<String>>  {
     
     println!("Adding user {} {} {} {}", &username, &passwd, salt, random_session_id); 
     
-    let conn = db_connect();	
-    match db_add_user(&conn, &username, &passwd, salt, random_session_id) {
-    	Err(e) => {println!("Nope! {}", e); return Err(BadRequest(Some(format!("Failure adding userpk failure: {}", e))))},
-    	Ok(_r) => return Ok(())
-    }
+	// Create keys for the user
+    let conn = db_connect();
+	let session: schema::Session = db_get_session_by_api_key(&conn, &random_session_id).unwrap();
+	let scheme: String = session.scheme;
+	if scheme.eq("bsw") {
+		let master_key_material: Vec<String> = serde_json::from_str(&session.key_material).unwrap();
+		let master_pk: bsw::CpAbePublicKey = serde_json::from_str(&master_key_material[0]).unwrap();
+		let master_mk: bsw::CpAbeMasterKey = serde_json::from_str(&master_key_material[1]).unwrap();
+		let user_sk: bsw::CpAbeSecretKey = bsw::keygen(&master_pk, &master_mk, &d.attributes).unwrap();
+
+		match db_add_user(&conn, &username, &passwd, salt, &d.attributes, &serde_json::to_string(&user_sk).unwrap(), random_session_id) {
+			Err(e) => {println!("Nope! {}", e); return Err(BadRequest(Some(format!("Failure adding userpk failure: {}", e))))},
+			Ok(_r) => return Ok(())
+		}
+	}
+	return Err(BadRequest(Some(format!("Scheme {} not supported", scheme))));
 }
 
 #[post(path="/list_attrs", format="application/json", data="<d>")]
@@ -283,22 +251,13 @@ fn _keygen(param: KeyGenMsg) -> Result<Vec<String>, String> {
 //                    Internal methods follow
 // ------------------------------------------------------------
 
-/// TODO Deprecated To be removed. Do not store keys in files.
-fn get_pk() -> BoxedResult<bsw::CpAbePublicKey> {
-	let mut f = try!(File::open(PK_FILE));
-	let mut s: String = String::new();
-	f.read_to_string(&mut s)?;
-	let pk: bsw::CpAbePublicKey = serde_json::from_str(&mut s).unwrap();
-	return Ok(pk);
-}
-
 fn db_connect() -> MysqlConnection {
 	let database_url : String = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
 	MysqlConnection::establish(&database_url).expect(&format!("Error connecting to {}", database_url))	// TODO Replace MysqlConnection with more generic "Connection"?
 }
 
 /// Adds a user to database.
-fn db_add_user(conn: &MysqlConnection, username: &String, passwd: &String, salt: i32, random_session_id: &String) -> Result<usize, String> {
+fn db_add_user(conn: &MysqlConnection, username: &String, passwd: &String, salt: i32, attributes: &Vec<String>, key_material: &String, random_session_id: &String) -> Result<usize, String> {
 	use schema::users;
 	use schema::sessions;
 	
@@ -312,14 +271,15 @@ fn db_add_user(conn: &MysqlConnection, username: &String, passwd: &String, salt:
 	 	.filter(users::username.eq(username.to_string()))
 		.filter(users::session_id.eq(session.id))
         .first::<schema::User>(conn) {
-        	Ok(_u) => return Err("User already exists".to_string()),
+        	Ok(_u) => return Err("User already exists for this session".to_string()),
         	Err(_e) => {}
         };
 	
 	let user = schema::NewUser {
 		username: username.to_string(),
 		password: passwd.to_string(),	// TODO store salted hash of pwd.
-		attributes: serde_json::to_string(&vec!["".to_string()]).unwrap(),
+		attributes: serde_json::to_string(attributes).unwrap(),
+		key_material: key_material.to_string(),
 		salt: salt,
 		session_id: session.id
 	};
@@ -359,35 +319,11 @@ fn db_create_session(conn: &MysqlConnection, scheme: &String, key_material: &Vec
         }
 }
 
-fn db_get_session_by_user_scheme(conn: &MysqlConnection, user: &String, scheme: &String) -> Option<schema::Session> {
-	use schema::sessions;
-	use schema::users;
-	
-	match users::table
-	.inner_join(sessions::table)
-	.filter(users::username.eq(user))
-	.filter(sessions::scheme.eq(scheme))
-	.get_results::<(schema::User, schema::Session)>(conn) {
-		Ok(result) => result.into_iter().map(|(_user, session)| session).last(),
-		Err(_e) => None
-	}
-}
-
 fn db_get_session_by_api_key(conn: &MysqlConnection, api_key: &String) -> Result<schema::Session, diesel::result::Error> {
 	use schema::sessions;
 	
 	 sessions::table.filter(sessions::random_session_id.eq(api_key))
         .first::<schema::Session>(conn)
-}
-
-fn db_get_user_by_username<'a>(conn: &MysqlConnection, user: &'a String) -> Option<schema::User> {
-	use schema::users;
-	
-	 match users::table.filter(users::username.eq(user))
-        .first::<schema::User>(conn) {
-			Ok(u) => Some(u),
-			Err(_) => None
-		}
 }
 
 fn _db_get_users_by_apikey<'a>(conn: &MysqlConnection, api_key: &'a String) -> Vec<schema::User> {
@@ -420,18 +356,11 @@ fn rocket() -> rocket::Rocket {
 	//     }
 	// });
 	
-    rocket::ignite().mount("/", routes![login, setup, list_attrs, encrypt, decrypt, add_user])
+    rocket::ignite().mount("/", routes![setup, list_attrs, encrypt, decrypt, add_user])
 }
 
 fn main() {
     rocket().launch();
-    
-    // if !is_initialized() {
-    // 	match init_abe_setup() {
-    // 		Err(_e) => panic!("Could not initialize"),
-    // 		Ok(()) => {}
-    // 	}
-    // }
 }
 
 /// Returns true if `key` is a valid API key string.
@@ -466,39 +395,6 @@ mod tests {
     use rocket::local::Client;
     use rocket::http::Status;
     use super::*;
-
-    #[test]
-	#[ignore]
-    fn test_login_succ() {    	
-        let client = Client::new(rocket()).expect("valid rocket instance");
-        
-        let user = User {
-			random_session_id: String::from("blabla"),
-        	username: String::from("admin"),
-        	password: String::from("admin")
-        };
-        
-        let response_add = client.post("/add_user")
-        					.header(ContentType::JSON)
-					        .body(serde_json::to_string(&json!(&user)).expect("Attribute serialization"))
-					        .dispatch();
-					        
-        assert_eq!(response_add.status(), Status::Ok);
-
-        let mut response = client.post("/login")
-					        .header(Header::new("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8"))
-					        .body("grant_type=password&username=admin_bsw&password=admin")
-					        .dispatch();
-					        
-        assert_eq!(response.status(), Status::Ok);
-
-		// Panics if API key is not in valid UUID format 
-		let body: String = response.body_string().unwrap();
-
-		let access_token: AccessTokenResponse = serde_json::from_str(body.as_str()).unwrap();
-		println!("API key: {}", access_token.access_token);
-		Uuid::parse_str(access_token.access_token.as_str()).unwrap();
-    }
     
     #[test]
     fn test_db_user() {
@@ -510,8 +406,10 @@ mod tests {
     	// Write user into db		    	
     	let user: String = "bla".to_string();
     	let passwd: String = "blubb".to_string();
+		let key_material: String = "".to_string();
+		let attributes: Vec<String>= vec!("".to_string());
     	let salt: i32 = 1234;
-    	let result: usize = db_add_user(&con, &user, &passwd, salt, &session_id).unwrap();
+    	let result: usize = db_add_user(&con, &user, &passwd, salt, &attributes, &key_material, &session_id).unwrap();
     	assert!(result > 0);
 
 		// Check that it is there
@@ -535,15 +433,14 @@ mod tests {
     	};
     	let key_material: Vec<String> = _keygen(key_gen_parms).unwrap();
 
-    	let attributes: String = String::from("");
+    	let attributes: Vec<String> = vec!(String::from(""));
 
 		let scheme: String = "bsw".to_string();
 
-		let session_id: String = db_create_session(&con, &scheme, &key_material, &attributes).expect("Could not create session");
+		let session_id: String = db_create_session(&con, &scheme, &key_material, &serde_json::to_string(&attributes).unwrap()).expect("Could not create session");
 		println!("Got session id {}", session_id);
 
-    	db_add_user(&con, &user, &passwd, salt, &session_id).expect("Failure adding user");
-
+    	db_add_user(&con, &user, &passwd, salt, &attributes, &serde_json::to_string(&key_material).unwrap(), &session_id).expect("Failure adding user");	
     }
     
     #[test]
@@ -571,6 +468,7 @@ mod tests {
 			random_session_id: session_id,
         	username : String::from("admin"),
         	password : String::from("admin"),
+			attributes: vec!("attribute_1".to_string())
         };
         
         let response_add: rocket::local::LocalResponse = client.post("/add_user")
@@ -578,34 +476,11 @@ mod tests {
 					        .body(serde_json::to_string(&json!(&user)).expect("Attribute serialization"))
 					        .dispatch();
         //assert_eq!(response_add.status(), Status::Ok);
-
-        // Log in as user and get API ley
-        let mut response = client.post("/login")
-					        .header(Header::new("Content-Type", "application/x-www-form-urlencoded"))
-					        .body("grant_type=password&username=admin_bsw&password=admin")
-					        .dispatch();
-					        
-        assert_eq!(response.status(), Status::Ok);
-
-		let body: String = response.body_string().unwrap();
-		let access_token: AccessTokenResponse = serde_json::from_str(body.as_str()).unwrap();
-		println!("API key: {}", access_token.access_token);
     }  
 
     #[test]
     fn test_encrypt_decrypt() {
         let client = Client::new(rocket()).expect("valid rocket instance");
-
-
-        // let mut response = client.post("/login")
-		// 			        .header(Header::new("Content-Type", "application/x-www-form-urlencoded"))
-		// 			        .body("grant_type=password&username=admin&password=admin&scheme=bsw")
-		// 			        .dispatch();
-					        
-        // assert_eq!(response.status(), Status::Ok);
-		// let body: String = response.body_string().unwrap();
-		// let access_token: AccessTokenResponse = serde_json::from_str(body.as_str()).unwrap();
-		// println!("API key: {}", access_token.access_token);
 
 		// Set up scheme
         let setup_msg: SetupMsg = SetupMsg {
@@ -626,23 +501,16 @@ mod tests {
         	random_session_id: session_id.to_string(),
 			username : String::from("admin"),
         	password : String::from("admin"),
+			attributes: vec!("attribute_1".to_string())
         };
         
         let _response_add = client.post("/add_user")
         					.header(ContentType::JSON)
 					        .body(serde_json::to_string(&json!(&user)).expect("Attribute serialization"))
 					        .dispatch();
-					        
-        //assert_eq!(response_add.status(), Status::Ok);
-
-        let mut resp_pk = client.get("/pk")
-					        .header(Header::new("Authorization", "Bearer ".to_owned() + &session_id))
-					        .dispatch();
-		let pk = resp_pk.body_string().unwrap();
-		println!("This is how a public key looks: {}", pk);
 
 		// Encrypt some text for a policy
-		let policy:String = String::from(r#"{"AND": [{"ATT": "attribute_1"}, {"ATT": "attribute_2"}]}"#);
+		let policy:String = String::from(r#"{"OR": [{"ATT": "attribute_1"}, {"ATT": "attribute_2"}]}"#);
 		let msg : EncMessage = EncMessage { 
 			plaintext : "Encrypt me".into(),
 			policy : policy,
@@ -661,7 +529,9 @@ mod tests {
 		// Decrypt again
 		let c : DecMessage = DecMessage { 
 			ct: ct_json,
-			session_id: session_id.clone()
+			session_id: session_id.clone(),
+			username: String::from("admin"),
+			password: String::from("admin")
 		};
 		let mut resp_dec = client.post("/decrypt")
 					        .header(ContentType::JSON)

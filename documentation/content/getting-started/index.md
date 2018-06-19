@@ -6,10 +6,11 @@ weight: 10
 
 
 Welcome to the R-ABE Keyserver API! This REST API wraps the attribute based encryption (ABE) schemes of the R-ABE library and can be used to set up an ABE key server.
-
-Note that the API is still under development and must not be used in production. We rather provide it as an easy way to get started with R-ABE, without writing your own standalone program in Rust or C.
-
 Currently, the keyserver API supports only the "BSW" scheme, as described in [1], but we plan to add support for all six schemes implemented by R-ABE.
+
+
+_Note that the API is still under development and must not be used in production. We rather provide it as an easy way to get started with R-ABE, without writing your own standalone program in Rust or C._
+
 
 
 
