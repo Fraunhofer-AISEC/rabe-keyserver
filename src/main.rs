@@ -22,13 +22,12 @@ use rand::os::OsRng;
 use rocket_contrib::{Json}; 
 use rocket::response::status::BadRequest;
 use rocket::http::*;
-use rocket::request::Form;
 use rocket::request::FromRequest;
 use rocket::request::Request;
 use rocket::outcome::Outcome;
 use diesel::*;
 use std::str;
-use std::io::Read;
+use std::str::FromStr;
 use std::env;
 use rabe::schemes::bsw;
 use blake2_rfc::blake2b::*;
@@ -39,10 +38,18 @@ pub mod schema;
 // Change the alias to `Box<error::Error>`.
 type BoxedResult<T> = std::result::Result<T, Box<Error>>;
 
-static START: Once = ONCE_INIT;
-
-
-const SCHEMES: &'static [&'static str] = &["bsw"];
+enum SCHEMES {
+	bsw
+}
+impl FromStr for SCHEMES {
+    type Err = ();
+    fn from_str(s: &str) -> Result<SCHEMES, ()> {
+        match s {
+            "bsw" => Ok(SCHEMES::bsw),
+            _ => Err(()),
+        }
+    }
+}
 
 // ----------------------------------------------------
 //           Internal structs follow
@@ -154,19 +161,21 @@ fn decrypt(d:Json<DecMessage>) -> Result<Json<String>, BadRequest<String>>  {
 	let user: schema::User = users.into_iter().take_while(|u| u.username.eq(&d.username)).next().unwrap();
 	let key_material: String = user.key_material;
 
-	if session.scheme.eq("bsw") {
-		let ct: bsw::CpAbeCiphertext = serde_json::from_str(&d.ct).unwrap();
-		let sk: bsw::CpAbeSecretKey = serde_json::from_str(&key_material).unwrap();
-		
-		// Decrypt ciphertext
-		let res = bsw::decrypt(&sk, &ct).unwrap();
-		let s = match str::from_utf8(&res) {
-			Ok(v) => v,
-			Err(e) => panic!("Invalid UTF-8 sequence: {}", e),
-		};
-		return Ok(Json(s.to_string()))
+	match session.scheme.parse::<SCHEMES>() {
+		Ok(SCHEMES::bsw) => {
+			let ct: bsw::CpAbeCiphertext = serde_json::from_str(&d.ct).unwrap();
+			let sk: bsw::CpAbeSecretKey = serde_json::from_str(&key_material).unwrap();
+			
+			// Decrypt ciphertext
+			let res = bsw::decrypt(&sk, &ct).unwrap();
+			let s = match str::from_utf8(&res) {
+				Ok(v) => v,
+				Err(e) => panic!("Invalid UTF-8 sequence: {}", e),
+			};
+			Ok(Json(s.to_string()))
+		},
+		Err(_) => Err(BadRequest(Some(format!("Unsupported scheme {} of session {}", session.scheme, session.random_session_id))))
 	}
-	return Err(BadRequest(Some(format!("Unsupported scheme {} of session {}", session.scheme, session.random_session_id))));
 }
 
 #[post(path="/add_user", format="application/json", data="<d>")]
@@ -182,18 +191,20 @@ fn add_user(d:Json<User>) -> Result<(), BadRequest<String>>  {
     let conn = db_connect();
 	let session: schema::Session = db_get_session_by_api_key(&conn, &random_session_id).unwrap();
 	let scheme: String = session.scheme;
-	if scheme.eq("bsw") {
-		let master_key_material: Vec<String> = serde_json::from_str(&session.key_material).unwrap();
-		let master_pk: bsw::CpAbePublicKey = serde_json::from_str(&master_key_material[0]).unwrap();
-		let master_mk: bsw::CpAbeMasterKey = serde_json::from_str(&master_key_material[1]).unwrap();
-		let user_sk: bsw::CpAbeSecretKey = bsw::keygen(&master_pk, &master_mk, &d.attributes).unwrap();
+	match scheme.parse::<SCHEMES>() {
+		Ok(SCHEMES::bsw) => {
+			let master_key_material: Vec<String> = serde_json::from_str(&session.key_material).unwrap();
+			let master_pk: bsw::CpAbePublicKey = serde_json::from_str(&master_key_material[0]).unwrap();
+			let master_mk: bsw::CpAbeMasterKey = serde_json::from_str(&master_key_material[1]).unwrap();
+			let user_sk: bsw::CpAbeSecretKey = bsw::keygen(&master_pk, &master_mk, &d.attributes).unwrap();
 
-		match db_add_user(&conn, &username, &passwd, salt, &d.attributes, &serde_json::to_string(&user_sk).unwrap(), random_session_id) {
-			Err(e) => {println!("Nope! {}", e); return Err(BadRequest(Some(format!("Failure adding userpk failure: {}", e))))},
-			Ok(_r) => return Ok(())
-		}
+			match db_add_user(&conn, &username, &passwd, salt, &d.attributes, &serde_json::to_string(&user_sk).unwrap(), random_session_id) {
+				Err(e) => {println!("Nope! {}", e); return Err(BadRequest(Some(format!("Failure adding userpk failure: {}", e))))},
+				Ok(_r) => return Ok(())
+			}
+		},
+		Err(_) => { return Err(BadRequest(Some(format!("Scheme {} not supported", scheme)))); }
 	}
-	return Err(BadRequest(Some(format!("Scheme {} not supported", scheme))));
 }
 
 #[post(path="/list_attrs", format="application/json", data="<d>")]
@@ -230,21 +241,22 @@ fn setup(d:Json<SetupMsg>) -> Result<(String), BadRequest<String>> {
 
 fn _keygen(param: KeyGenMsg) -> Result<Vec<String>, String> {
 	let scheme: String = param.scheme;
-	if scheme.ne("bsw") {	// TODO Support all other schemes besides bsw
-		println!("WARNING. Unsupported scheme {} demanded. Using bsw", scheme);
-	};
+	match scheme.parse::<SCHEMES>() {
+		Ok(SCHEMES::bsw) => {
+			// Generating mk
+			let (pk, mk): (bsw::CpAbePublicKey,bsw::CpAbeMasterKey) = bsw::setup();
+			let mut _attributes = param.attributes;
+			
+			//Generating attribute keys
+			let res:bsw::CpAbeSecretKey = bsw::keygen(&pk, &mk, &_attributes).unwrap();
+			
+			Ok(vec![serde_json::to_string(&pk).unwrap(),
+					serde_json::to_string(&mk).unwrap(),
+					serde_json::to_string(&res).unwrap()])
 
-    // Generating mk
-	let (pk, mk): (bsw::CpAbePublicKey,bsw::CpAbeMasterKey) = bsw::setup();
-    let mut _attributes = param.attributes;
-    
-    //Generating attribute keys
-    let res:bsw::CpAbeSecretKey = bsw::keygen(&pk, &mk, &_attributes).unwrap();
-    
-    Ok(vec![serde_json::to_string(&pk).unwrap(),
-	    	serde_json::to_string(&mk).unwrap(),
-	    	serde_json::to_string(&res).unwrap()])
-    
+		},
+		Err(e) => Err("Unsupported scheme".to_string())
+	}    
 }
 
 // ------------------------------------------------------------
@@ -295,28 +307,29 @@ fn db_add_user(conn: &MysqlConnection, username: &String, passwd: &String, salt:
 fn db_create_session(conn: &MysqlConnection, scheme: &String, key_material: &Vec<String>, attributes: &String) -> Result<String, String> {
 	use schema::sessions;
 	println!("Got scheme {}", scheme);
-	if !SCHEMES.contains(&scheme.as_str()) {
-		return Err("Invalid scheme".to_string());
+	match scheme.parse::<SCHEMES>() {
+		Ok(_scheme) => {
+			let session_id: String = OsRng::new().unwrap().next_u64().to_string();
+			let session = schema::NewSession {
+				is_initialized: false,
+				scheme: scheme.to_string(),
+				random_session_id: session_id.clone(),
+				key_material: serde_json::to_string(key_material).unwrap(),
+				attributes: attributes.to_string()
+			};
+			
+			println!("Key material is {}", session.key_material);
+			
+			// Return auto-gen'd session id
+			match diesel::insert_into(sessions::table)
+				.values(&session)
+				.execute(conn) {
+					Ok(_usize) => Ok(session_id),
+					Err(_e) => Err("Could not insert into sessions".to_string())
+				}
+		}
+		Err(_) => Err("Invalid scheme".to_string())
 	}
-
-	let session_id: String = OsRng::new().unwrap().next_u64().to_string();
-	let session = schema::NewSession {
-		is_initialized: false,
-		scheme: scheme.to_string(),
-		random_session_id: session_id.clone(),
-		key_material: serde_json::to_string(key_material).unwrap(),
-		attributes: attributes.to_string()
-	};
-	
-	println!("Key material is {}", session.key_material);
-	
-	// Return auto-gen'd session id
-    match diesel::insert_into(sessions::table)
-        .values(&session)
-        .execute(conn) {
-        	Ok(_usize) => Ok(session_id),
-        	Err(_e) => Err("Could not insert into sessions".to_string())
-        }
 }
 
 fn db_get_session_by_api_key(conn: &MysqlConnection, api_key: &String) -> Result<schema::Session, diesel::result::Error> {
@@ -324,6 +337,16 @@ fn db_get_session_by_api_key(conn: &MysqlConnection, api_key: &String) -> Result
 	
 	 sessions::table.filter(sessions::random_session_id.eq(api_key))
         .first::<schema::Session>(conn)
+}
+
+fn _db_get_user_by_username<'a>(conn: &MysqlConnection, user: &'a String) -> Option<schema::User> {
+	use schema::users;
+	
+	 match users::table.filter(users::username.eq(user))
+        .first::<schema::User>(conn) {
+			Ok(u) => Some(u),
+			Err(_) => None
+		}
 }
 
 fn _db_get_users_by_apikey<'a>(conn: &MysqlConnection, api_key: &'a String) -> Vec<schema::User> {
@@ -347,15 +370,6 @@ fn _to_db_passwd(plain_password: String, salt: i32) -> Blake2bResult {
 }
 
 fn rocket() -> rocket::Rocket {
-	// START.call_once(|| {
-	//     if !is_initialized() {
-	//     	match init_abe_setup() {
-	//     		Err(_e) => panic!("Could not initialize"),
-	//     		Ok(()) => {}
-	//     	}
-	//     }
-	// });
-	
     rocket::ignite().mount("/", routes![setup, list_attrs, encrypt, decrypt, add_user])
 }
 
@@ -413,7 +427,7 @@ mod tests {
     	assert!(result > 0);
 
 		// Check that it is there
-    	let u: schema::User = db_get_user_by_username(&con, &user).unwrap();
+    	let u: schema::User = _db_get_user_by_username(&con, &user).unwrap();
     	assert_eq!(u.username, user);
     }
     
@@ -456,7 +470,6 @@ mod tests {
         };
         let mut response = client.post("/setup")
 					        .header(ContentType::JSON)
-					        //.header(Header::new("Authorization", access_token.access_token.clone()))
 					        .body(serde_json::to_string(&json!(&setup_msg)).expect("Setting up bsw"))
 					        .dispatch();
 		assert_eq!(response.status(), Status::Ok);
@@ -489,7 +502,6 @@ mod tests {
         };
         let mut response = client.post("/setup")
 					        .header(ContentType::JSON)
-					        //.header(Header::new("Authorization", "Bearer ".to_owned() + &access_token.access_token))
 					        .body(serde_json::to_string(&json!(&setup_msg)).expect("Setting up bsw"))
 					        .dispatch();
 		assert_eq!(response.status(), Status::Ok);
@@ -518,7 +530,6 @@ mod tests {
 		};
 		let mut resp_enc = client.post("/encrypt")
 					        .header(ContentType::JSON)
-					        //.header(Header::new("Authorization", "Bearer ".to_owned() + &session_id))
 					        .body(serde_json::to_string(&msg).expect("Encryption"))
 					        .dispatch();
 		
@@ -535,7 +546,6 @@ mod tests {
 		};
 		let mut resp_dec = client.post("/decrypt")
 					        .header(ContentType::JSON)
-					        //.header(Header::new("Authorization", "Bearer ".to_owned() + &session_id))
 					        .body(serde_json::to_string(&c).unwrap())
 					        .dispatch();
 		let pt_hex: String = resp_dec.body_string().unwrap();
