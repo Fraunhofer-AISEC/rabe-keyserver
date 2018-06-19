@@ -2,5 +2,5 @@
 	path = rust-abe
 	url = git@git-int.aisec.fraunhofer.de:sas/rust-abe.git
 [submodule "documentation/themes/hugo-material-docs"]
-	path = documentation/themes/hugo-material-docs
+	path = docs/themes/hugo-material-docs
 	url = git@github.com:digitalcraftsman/hugo-material-docs.git
