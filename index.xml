@@ -13,12 +13,22 @@
     
     <item>
       <title>R-ABE Keyserver</title>
-      <link>https://fraunhofer-aisec.github.io/rabe-keyserver/</link>
+      <link>https://fraunhofer-aisec.github.io/rabe-keyserver/usage/</link>
       <pubDate>Thu, 08 Mar 2018 21:07:13 +0100</pubDate>
       
-      <guid>https://fraunhofer-aisec.github.io/rabe-keyserver/</guid>
+      <guid>https://fraunhofer-aisec.github.io/rabe-keyserver/usage/</guid>
       <description>Welcome to the R-ABE Keyserver API! This REST API wraps the attribute based encryption (ABE) schemes of the R-ABE library and can be used to set up an ABE key server. Currently, the keyserver API supports only the &amp;ldquo;BSW&amp;rdquo; scheme, as described in [1], but we plan to add support for all six schemes implemented by R-ABE.
 Note that the API is still under development and must not be used in production.</description>
+    </item>
+    
+    <item>
+      <title>License</title>
+      <link>https://fraunhofer-aisec.github.io/rabe-keyserver/license/</link>
+      <pubDate>Tue, 19 Jun 2018 20:10:46 +0100</pubDate>
+      
+      <guid>https://fraunhofer-aisec.github.io/rabe-keyserver/license/</guid>
+      <description>Copyright 2018 Fraunhofer AISEC
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the &amp;ldquo;Software&amp;rdquo;), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:</description>
     </item>
     
   </channel>
