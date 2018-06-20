@@ -18,7 +18,7 @@
 #   # The returned value is your session_id for that scheme
 #
 #   # Encrypt the string "test" for attribute TEST1 and store result in an env variable:
-#   $CIPHER=`python3 ./rabe-client.py encrypt test "{\"ATT\": \"TEST1\"}" 11984071560866280529`
+#   $CIPHER=`python3 ./rabe-client.py encrypt test "{\"OR\": [{\"ATT\": \"attribute_1\"}, {\"ATT\": \"attribute_2\"}]}" 11984071560866280529`
 #
 #   # Decrypt the string "test" for attributes TEST1 and TEST2:
 #   $python3 ./rabe-client.py decrypt "$CIPHER" 8777877240608612071
@@ -85,7 +85,7 @@ def simple_get_request(call, *params, authorize=False):
 	#session = get_oauth_session()
 	session = requests.Session()
 
-	response = session.get(req, verify=False, auth=auth)
+	response = session.get(req, verify=False)
 
 	try:
 		# Handle response
@@ -105,7 +105,7 @@ def simple_post_json(call, data, authorize=False):
 	req = "{0}/{1}".format(BASE_URL, call)
 	#session = get_oauth_session()
 	session = requests.Session()
-	response = session.post(req, json=data, verify=False, auth=auth)
+	response = session.post(req, json=data, verify=False)
 
 	try:
 		# Handle response
@@ -146,9 +146,14 @@ def version():
 	print(res)
 
 
-def add_user(username, password):
+def add_user(username, password, session_id, attributes):
 	req = "{0}/add_user".format(BASE_URL)
-	data = {"username": username, "password": password}
+	data = {
+		"username": username, 
+		"password": password,
+		"random_session_id": session_id,
+		"attributes": attributes
+	}
 	requests.post(req, json=data)
 
 
@@ -178,7 +183,7 @@ def main():
 		if len(sys.argv) == 1 or sys.argv[1] in ['help', '-h', '--help']:
 			print("Usage: %s <command> <params>" % sys.argv[0])
 			print("available commands:")
-			print("\t adduser <username> <password>")
+			print("\t adduser <username> <password> <attributes>")
 			print("\t scheme_setup <scheme> <attributes>")
 			print("\t public_key <session_id>")
 			print("\t encrypt <plaintext> <policy> <session_id>")
@@ -186,10 +191,10 @@ def main():
 		elif sys.argv[1] in ['version']:
 			version()
 		elif sys.argv[1] in ['adduser']:
-			if len(sys.argv) != 4:
-				print("wrong syntax. Please use: " + sys.argv[0] + " adduser <username> <password>")
+			if len(sys.argv) < 5:
+				print("wrong syntax. Please use: " + sys.argv[0] + " adduser <username> <password> <seesion_id> [attr_1], [attr_2], ...")
 				return
-			add_user(sys.argv[2], sys.argv[3])
+			add_user(sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5:])
 		elif sys.argv[1] in ['scheme_setup']:
 			if len(sys.argv) < 4:
 				print("wrong syntax. Please use: " + sys.argv[0] + " scheme_setup <scheme> [attr_1], [attr_2] , ...")
