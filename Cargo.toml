@@ -16,10 +16,10 @@ blake2-rfc = "0.2.17"
 rand = "0.4.2"
 
 # Does not work because Cargo does not properly handle ssh auth
-#rabe = { git = "ssh://git@git-int.aisec.fraunhofer.de/sas/rust-abe.git", tag = "rest-api-f90c8209ffc38e29c676f41324f13cb64a3bdcc2" }
+rabe = { git = "https://github.com/Fraunhofer-AISEC/rabe.git", tag = "rest-api-f90c8209ffc38e29c676f41324f13cb64a3bdcc2" }
 
 # Instead we use r-abe from a git submodule that refers to a working revision of r-abe.
-rabe = { path = "./rust-abe" }
+#rabe = { path = "./rust-abe" }
 
 [dependencies.rocket_contrib]
 default-features = false

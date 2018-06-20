@@ -1,4 +1,4 @@
-baseurl = "https://www.github.com/FraunhoferAISEC/rabe-keyserver"
+baseurl = "https://fraunhofer-aisec.github.io/rabe-keyserver"
 languageCode = "en-us"
 title = "R-ABE Keyserver API"
 theme = "hugo-material-docs"
@@ -41,7 +41,7 @@ googleAnalytics = ""
 
 [social]
 	twitter = ""
-	github  = "FraunhoferAISEC"
+	github  = "Fraunhofer-AISEC"
 	email   = ""
 
 

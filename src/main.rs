@@ -157,7 +157,8 @@ fn decrypt(d:Json<DecMessage>) -> Result<Json<String>, BadRequest<String>>  {
 	// Get session from DB and extract key material needed for decryption
 	let conn = db_connect();
     let session: schema::Session = db_get_session_by_api_key(&conn, &d.session_id).unwrap();
-	let users: Vec<schema::User> = _db_get_users_by_apikey(&conn, &d.session_id);
+	let users: Vec<schema::User> = _db_get_users_by_apikey(&conn, &session.random_session_id);
+	println!("Users {:?}", users.len());
 	let user: schema::User = users.into_iter().take_while(|u| u.username.eq(&d.username)).next().unwrap();
 	let key_material: String = user.key_material;
 
@@ -349,14 +350,13 @@ fn _db_get_user_by_username<'a>(conn: &MysqlConnection, user: &'a String) -> Opt
 		}
 }
 
-fn _db_get_users_by_apikey<'a>(conn: &MysqlConnection, api_key: &'a String) -> Vec<schema::User> {
+fn _db_get_users_by_apikey<'a>(conn: &MysqlConnection, api_key: &String) -> Vec<schema::User> {
 	use schema::sessions;
 	use schema::users;
 	
-	let key : String = api_key.replace("Bearer ", "");
 	users::table
 		.inner_join(sessions::table)
-		.filter(sessions::random_session_id.eq(key))
+		.filter(sessions::random_session_id.eq(api_key))
         .get_results::<(schema::User, schema::Session)>(conn)
 		.expect("Could not load users by API key {}")
 		.into_iter().map(|(user, _session)| user).collect()
