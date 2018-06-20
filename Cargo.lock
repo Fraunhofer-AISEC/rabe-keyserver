@@ -4,7 +4,7 @@ version = "0.1.0"
 dependencies = [
  "blake2-rfc 0.2.18 (registry+https://github.com/rust-lang/crates.io-index)",
  "diesel 1.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "rabe 0.1.1",
+ "rabe 0.1.0 (git+https://github.com/Fraunhofer-AISEC/rabe.git?tag=rest-api-f90c8209ffc38e29c676f41324f13cb64a3bdcc2)",
  "rand 0.4.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "rocket 0.3.12 (registry+https://github.com/rust-lang/crates.io-index)",
  "rocket-simpleauth 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -435,7 +435,8 @@ dependencies = [
 
 [[package]]
 name = "rabe"
-version = "0.1.1"
+version = "0.1.0"
+source = "git+https://github.com/Fraunhofer-AISEC/rabe.git?tag=rest-api-f90c8209ffc38e29c676f41324f13cb64a3bdcc2#d8573139e87bb7f2c3320d59a78686d716da582b"
 dependencies = [
  "arrayref 0.3.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "bincode 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -844,6 +845,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 "checksum proc-macro2 0.4.6 (registry+https://github.com/rust-lang/crates.io-index)" = "effdb53b25cdad54f8f48843d67398f7ef2e14f12c1b4cb4effc549a6462a4d6"
 "checksum quote 0.4.2 (registry+https://github.com/rust-lang/crates.io-index)" = "1eca14c727ad12702eb4b6bfb5a232287dcf8385cb8ca83a3eeaf6519c44c408"
 "checksum quote 0.6.3 (registry+https://github.com/rust-lang/crates.io-index)" = "e44651a0dc4cdd99f71c83b561e221f714912d11af1a4dff0631f923d53af035"
+"checksum rabe 0.1.0 (git+https://github.com/Fraunhofer-AISEC/rabe.git?tag=rest-api-f90c8209ffc38e29c676f41324f13cb64a3bdcc2)" = "<none>"
 "checksum rand 0.3.22 (registry+https://github.com/rust-lang/crates.io-index)" = "15a732abf9d20f0ad8eeb6f909bf6868722d9a06e1e50802b6a70351f40b4eb1"
 "checksum rand 0.4.2 (registry+https://github.com/rust-lang/crates.io-index)" = "eba5f8cb59cc50ed56be8880a5c7b496bfd9bd26394e176bc67884094145c2c5"
 "checksum rayon 0.7.1 (registry+https://github.com/rust-lang/crates.io-index)" = "a77c51c07654ddd93f6cb543c7a849863b03abc7e82591afda6dc8ad4ac3ac4a"
