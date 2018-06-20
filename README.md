@@ -1,9 +1,18 @@
-[![pipeline status](https://git-int.aisec.fraunhofer.de/sas/rust-abe-rest/badges/master/pipeline.svg)](https://git-int.aisec.fraunhofer.de/sas/rust-abe-rest/commits/master)
-
 # REST API for rust-abe attribute based encryption library
 
-At present, this is a toy project and only supports the BSW ABE scheme. Feel free to extend as desired.
+This is a standalone web server that makes the [rabe](https://github.com/Fraunhofer-AISEC/rabe) library for Attribute Based Encryption (ABE) usable via a REST API.
 
+Currently, rabe-keyserver only supports the BSW scheme, but further schemes implemented by rabe might be added in the future.
+
+Head over to the [Github page](https://fraunhofer-aisec.github.io/rabe-keyserver/) for documentation.
+
+## Checkout
+
+Clone this project with subprojects:
+
+```
+git clone --recurse-submodules git@github.com:Fraunhofer-AISEC/rabe-keyserver.git
+```
 
 ## Building
 
@@ -19,8 +28,6 @@ You may also want to run ssh-agent before building, so cargo can pull from inter
 ```
 eval `ssh-agent -s`
 ```
-
-Alternatively, you can checkout rust-abe in a folder next to abe-keyserver and uncomment the respective line in `Cargo.toml`.
 
 Install diesel:
 
