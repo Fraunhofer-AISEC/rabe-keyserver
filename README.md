@@ -27,5 +27,11 @@ docker build . -t rabe-keyserver
 and you will end up with an ~70 MB docker images that hosts the rabe-keyserver. Start it with
 
 ```bash
-docker run -ti -P --env ROOT_ADDRESS=0.0.0.0 --env ROCKET_PORT=8000 --env ROCKET_ENV=production --restart always --env DATABASE_URL=mysql://username:password@localhost/rabe --name rabe rabe-keyserver:latest
+docker run -ti -P --env ROOT_ADDRESS=0.0.0.0 \
+		--env ROCKET_PORT=8000 \
+		--env ROCKET_ENV=production \
+		--env DATABASE_URL=mysql://username:password@localhost/rabe \
+		--restart always \
+		--name rabe \
+		rabe-keyserver:latest
 ```
