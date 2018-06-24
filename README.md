@@ -16,27 +16,16 @@ git clone --recurse-submodules git@github.com:Fraunhofer-AISEC/rabe-keyserver.gi
 
 ## Building
 
-This project is based on rocket, which requires rustc nightly:
+Rust is a rapidly evolving ecosystem. We provide a docker environment for building and running rabe-keyserver.
 
-```
-$ rustup component add rls --toolchain nightly-x86_64-unknown-linux-gnu
-$ rustup default nightly
-```
+Simply run 
 
-You may also want to run ssh-agent before building, so cargo can pull from internal git repos.
-
-```
-eval `ssh-agent -s`
+```bash
+docker build . -t rabe-keyserver
 ```
 
-Install diesel:
+and you will end up with an ~70 MB docker images that hosts the rabe-keyserver. Start it with
 
-```
-cargo install diesel_cli
-```
-
-Run with mysql (make sure you have a mysql server running on localhost):
-
-```
-DATABASE_URL=mysql://username:password@localhost/rabe cargo test -- --nocapture
+```bash
+docker run -ti -P --env ROOT_ADDRESS=0.0.0.0 --env ROCKET_PORT=8000 --env ROCKET_ENV=production --restart always --env DATABASE_URL=mysql://username:password@localhost/rabe --name rabe rabe-keyserver:latest
 ```
