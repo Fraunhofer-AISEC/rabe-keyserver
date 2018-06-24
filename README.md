@@ -16,7 +16,7 @@ git clone --recurse-submodules git@github.com:Fraunhofer-AISEC/rabe-keyserver.gi
 
 ## Building
 
-Rust is a rapidly evolving ecosystem. We provide a docker environment for building and running rabe-keyserver.
+Rust is a rapidly evolving ecosystem and future versions might break the build. We thus provide a stable docker environment for building and running `rabe-keyserver` based on rust _nightly-2018-06-10_.
 
 Simply run 
 
