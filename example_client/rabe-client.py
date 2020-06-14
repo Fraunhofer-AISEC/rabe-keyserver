@@ -183,7 +183,7 @@ def main():
 		if len(sys.argv) == 1 or sys.argv[1] in ['help', '-h', '--help']:
 			print("Usage: %s <command> <params>" % sys.argv[0])
 			print("available commands:")
-			print("\t adduser <username> <password> <attributes>")
+			print("\t adduser <username> <password> <session_id> <attributes>")
 			print("\t scheme_setup <scheme> <attributes>")
 			print("\t public_key <session_id>")
 			print("\t encrypt <plaintext> <policy> <session_id>")
@@ -192,7 +192,7 @@ def main():
 			version()
 		elif sys.argv[1] in ['adduser']:
 			if len(sys.argv) < 5:
-				print("wrong syntax. Please use: " + sys.argv[0] + " adduser <username> <password> <seesion_id> [attr_1], [attr_2], ...")
+				print("wrong syntax. Please use: " + sys.argv[0] + " adduser <username> <password> <session_id> [attr_1], [attr_2], ...")
 				return
 			add_user(sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5:])
 		elif sys.argv[1] in ['scheme_setup']:
