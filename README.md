@@ -1,3 +1,9 @@
+# Archived 
+
+This repository was archived on 07.06.2022 due to inactivity. 
+It will be replaced by an updated/upgraded/alternative version based on svelte/sveltekit, which can be found on the github page https://github.com/Fraunhofer-AISEC
+
+
 # REST API for rust-abe attribute based encryption library
 
 This is a standalone web server that makes the [rabe](https://github.com/Fraunhofer-AISEC/rabe) library for Attribute Based Encryption (ABE) usable via a REST API.
